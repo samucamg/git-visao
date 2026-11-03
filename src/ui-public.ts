@@ -515,8 +515,9 @@ const PUBLIC_TEMPLATE = `<!DOCTYPE html>
 
     var currentLang = 'pt';
 
-    function setLanguage(lang) {
+    function setLanguage(lang, triggerFetch) {
       if (!I18N_DICT[lang]) lang = 'pt';
+      var previous = currentLang;
       currentLang = lang;
       try { localStorage.setItem('gitvisao_lang', lang); } catch (e) {}
       document.documentElement.lang = (lang === 'pt' ? 'pt-BR' : lang);
@@ -532,6 +533,9 @@ const PUBLIC_TEMPLATE = `<!DOCTYPE html>
       });
 
       applyI18n();
+      if (triggerFetch && previous !== lang) {
+        fetchRepos(true);
+      }
     }
 
     function applyI18n() {
@@ -648,7 +652,7 @@ const PUBLIC_TEMPLATE = `<!DOCTYPE html>
     document.querySelectorAll('#lang-selector button').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var lang = btn.getAttribute('data-lang');
-        if (lang) setLanguage(lang);
+        if (lang) setLanguage(lang, true);
       });
     });
 
@@ -662,6 +666,7 @@ const PUBLIC_TEMPLATE = `<!DOCTYPE html>
       if (reset) { nextCursor = null; allRepos = []; $('repos-loading').classList.remove('hidden'); $('repos-empty').classList.add('hidden'); $('load-more-btn').classList.add('hidden'); }
       var p = new URLSearchParams();
       p.set('limit', '30'); p.set('sort', activeSort);
+      p.set('lang', currentLang);
       if (searchQuery.trim()) p.set('q', searchQuery.trim());
       if (activeCategory) p.set('category', activeCategory);
       if (!reset && nextCursor) p.set('cursor', nextCursor);
@@ -786,7 +791,7 @@ const PUBLIC_TEMPLATE = `<!DOCTYPE html>
       var btn = $('check-submit-btn');
       var t = I18N_DICT[currentLang] || I18N_DICT['pt'];
       btn.disabled = true; btn.textContent = t.checkVerifying;
-      fetch('/api/check?repo=' + encodeURIComponent(raw)).then(function (res) {
+      fetch('/api/check?repo=' + encodeURIComponent(raw) + '&lang=' + encodeURIComponent(currentLang)).then(function (res) {
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (r) {
         $('check-exists-panel').classList.add('hidden'); $('check-not-found-panel').classList.add('hidden');

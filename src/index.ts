@@ -239,7 +239,7 @@ async function handleAdminApi(
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
@@ -275,6 +275,20 @@ export default {
 
       // 3. Listagem pública do catálogo
       if (request.method === 'GET' && pathname === '/api/repos') {
+        const lang = searchParams.get('lang') || 'pt';
+        const cacheUrl = new URL(request.url);
+        if (!cacheUrl.searchParams.has('lang')) {
+          cacheUrl.searchParams.set('lang', lang);
+        }
+        const cacheKey = new Request(cacheUrl.toString(), request);
+        const cache = typeof caches !== 'undefined' ? caches.default : null;
+        if (cache) {
+          const cachedResponse = await cache.match(cacheKey);
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+        }
+
         await loadEffectiveContext(env);
         const sortParam = searchParams.get('sort');
         const sort =
@@ -289,9 +303,14 @@ export default {
             searchParams.get('template') || searchParams.get('templateType') || undefined,
           sort,
           limit: limitParam ? Number(limitParam) : 30,
-          cursor: searchParams.get('cursor') || undefined
+          cursor: searchParams.get('cursor') || undefined,
+          lang
         });
-        return jsonResponse({ ok: true, ...data });
+        const resp = jsonResponse({ ok: true, ...data });
+        if (cache && ctx) {
+          ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+        }
+        return resp;
       }
 
       // 4. Consulta pública: só diz se existe. Se não existir, guarda o pedido para o admin.
@@ -307,8 +326,9 @@ export default {
             400
           );
         }
+        const lang = searchParams.get('lang') || 'pt';
         await loadEffectiveContext(env);
-        const existing = await findRepoByKey(env.DB, parsed.repoKey, env);
+        const existing = await findRepoByKey(env.DB, parsed.repoKey, env, lang);
         if (!existing) {
           await recordVisitorRequest(env.DB, parsed.repoKey, parsed.fullName);
         }

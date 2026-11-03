@@ -1,5 +1,6 @@
 import { detectTemplateType, detectCategory } from './templates.ts';
 import { generateFallbackSummary } from './ai.ts';
+import { generateLocalizedFallbackSummary } from './templates_i18n.ts';
 import { isHarmfulRepository } from './github.ts';
 import { SEED_REPOSITORIES } from './seed.ts';
 import type {
@@ -80,6 +81,7 @@ export interface RepoSearchFilters {
   sort?: 'recent' | 'stars' | 'name';
   limit?: number;
   cursor?: string;
+  lang?: string;
 }
 
 export interface SerializedRepo
@@ -384,10 +386,38 @@ export async function ensureDatabaseInitialized(db: D1Database, env?: Env): Prom
 export async function findRepoByKey(
   db: D1Database,
   repoKey: string,
-  env?: Env
+  envOrLang?: Env | string,
+  maybeLang?: string
 ): Promise<SerializedRepo | null> {
   const normalizedKey = repoKey.trim().toLowerCase();
   if (!normalizedKey) return null;
+
+  let env: Env | undefined;
+  let lang = 'pt';
+  if (typeof envOrLang === 'string') {
+    lang = envOrLang;
+  } else if (envOrLang && typeof envOrLang === 'object') {
+    env = envOrLang;
+    if (typeof maybeLang === 'string') {
+      lang = maybeLang;
+    }
+  }
+  const validLang = ['pt', 'en', 'es'].includes(lang) ? lang : 'pt';
+
+  const kv = getKV(env);
+  if (kv) {
+    try {
+      const raw = await kv.get(`repo:${normalizedKey}:${validLang}`) || await kv.get(`repo:${normalizedKey}`);
+      if (raw) {
+        const item = JSON.parse(raw);
+        if (item && item.repo_key) {
+          return localizeSerializedRepo(item as SerializedRepo, validLang);
+        }
+      }
+    } catch {
+      // ignore KV error
+    }
+  }
 
   try {
     const row = await db
@@ -395,24 +425,11 @@ export async function findRepoByKey(
       .bind(normalizedKey)
       .first<RepoRecord>();
 
-    if (row) return serializeRepoRecord(row);
+    if (row) {
+      return localizeSerializedRepo(serializeRepoRecord(row), validLang);
+    }
   } catch (err) {
     console.warn(`Erro ao buscar repo no D1 (${normalizedKey}):`, err);
-  }
-
-  const kv = getKV(env);
-  if (kv) {
-    try {
-      const raw = await kv.get(`repo:${normalizedKey}`);
-      if (raw) {
-        const item = JSON.parse(raw);
-        if (item && item.repo_key) {
-          return item as SerializedRepo;
-        }
-      }
-    } catch {
-      // ignore KV error
-    }
   }
 
   return null;
@@ -518,7 +535,10 @@ export async function listRepositories(
 
   const rawRows = result?.results ?? [];
   const hasMore = rawRows.length > limit;
-  const items = (hasMore ? rawRows.slice(0, limit) : rawRows).map(serializeRepoRecord);
+  const lang = filters.lang && ['pt', 'en', 'es'].includes(filters.lang) ? filters.lang : 'pt';
+  const items = (hasMore ? rawRows.slice(0, limit) : rawRows).map((row) =>
+    localizeSerializedRepo(serializeRepoRecord(row), lang)
+  );
 
   let nextCursor: string | null = null;
   if (hasMore && items.length > 0) {
@@ -1088,6 +1108,7 @@ export async function runDataAutoHealing(db: D1Database, env?: Env): Promise<voi
         }
 
         const meta: GitHubRepoMetadata = {
+          repoKey: r.repo_key || `${r.owner}/${r.name}`,
           fullName: r.full_name,
           owner: r.owner,
           name: r.name,
@@ -1097,8 +1118,7 @@ export async function runDataAutoHealing(db: D1Database, env?: Env): Promise<voi
           forks: Number(r.forks || 0),
           language: r.language || '',
           topics,
-          openIssues: 0,
-          updatedAt: r.last_commit_at || new Date().toISOString(),
+          lastCommitAt: r.last_commit_at || new Date().toISOString(),
           readmeExcerpt: ''
         };
 
@@ -1200,4 +1220,47 @@ export async function runDataAutoHealing(db: D1Database, env?: Env): Promise<voi
   } catch (err) {
     console.error('[AutoHealing] Erro ao executar auto-healing v3:', err);
   }
+}
+
+
+export function localizeSerializedRepo(repo: SerializedRepo, lang: string = 'pt'): SerializedRepo {
+  if (!lang || lang === 'pt' || !['en', 'es'].includes(lang)) {
+    return repo;
+  }
+  const meta = {
+    repoKey: repo.repo_key,
+    fullName: repo.full_name,
+    owner: repo.owner,
+    name: repo.name,
+    repoUrl: repo.repo_url,
+    description: repo.description,
+    stars: repo.stars,
+    forks: repo.forks,
+    language: repo.language,
+    topics: repo.topics,
+    lastCommitAt: repo.last_commit_at,
+    readmeExcerpt: repo.summary_text || repo.intro_text,
+    licenseBadge: (repo as any).licenseBadge || (repo as any).license_badge,
+    costBadge: (repo as any).costBadge || (repo as any).cost_badge,
+    deployBadge: (repo as any).deployBadge || (repo as any).deploy_badge,
+    deployMethod: (repo as any).deployMethod || (repo as any).deploy_method
+  };
+  const summary = generateLocalizedFallbackSummary(meta, repo.template_type, lang as 'pt' | 'en' | 'es');
+  return {
+    ...repo,
+    hook_title: summary.hookTitle,
+    intro_text: summary.introText,
+    warning_note: summary.warningNote || repo.warning_note,
+    features: summary.features,
+    scenario_title: summary.scenarioTitle,
+    scenario_intro: summary.scenarioIntro,
+    scenario_prompt: summary.scenarioPrompt,
+    scenario_steps: summary.scenarioSteps,
+    scenario_outro: summary.scenarioOutro || repo.scenario_outro,
+    killer_title: summary.killerTitle,
+    killer_text: summary.killerText,
+    summary_text: summary.summaryText,
+    punchline: summary.punchline,
+    whatsapp_text: summary.whatsappText
+  };
 }

@@ -56,3 +56,9 @@ test('i18n: cost and deploy dictionaries are translated across pt, en, and es', 
   assert.ok(html.includes('100% Free & Local'), 'Custo em inglês deve estar presente');
   assert.ok(html.includes('100% Gratis y Local'), 'Custo em espanhol deve estar presente');
 });
+
+test('i18n: fetchRepos passes lang and setLanguage triggers re-fetch of analyses', () => {
+  const html = renderPublicHtml();
+  assert.ok(html.includes("p.set('lang', currentLang)"), "fetchRepos deve incluir p.set('lang', currentLang)");
+  assert.ok(html.includes('setLanguage(lang, true)'), 'Clique no seletor deve invocar setLanguage com triggerFetch');
+});
