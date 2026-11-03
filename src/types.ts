@@ -77,6 +77,10 @@ export interface GitHubRepoMetadata {
   deploy_difficulty?: DeployDifficulty;
   deploy_badge?: string;
   deploy_method?: string;
+  isHarmful?: boolean;
+  harmReason?: string;
+  is_harmful?: number;
+  harm_reason?: string;
 }
 
 export interface GeneratedVisaoSummary {
@@ -116,6 +120,10 @@ export interface GeneratedVisaoSummary {
   deploy_difficulty?: DeployDifficulty;
   deploy_badge?: string;
   deploy_method?: string;
+  isHarmful?: boolean;
+  harmReason?: string;
+  is_harmful?: number;
+  harm_reason?: string;
 }
 
 export interface RepoRecord {

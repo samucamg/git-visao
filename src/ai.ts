@@ -5,6 +5,7 @@ import type {
   GitHubRepoMetadata,
   TemplateType
 } from './types.ts';
+import { isHarmfulRepository } from './github.ts';
 import {
   CATEGORIES,
   TEMPLATE_VARIATIONS,
@@ -126,103 +127,160 @@ function extractReadmeHighlights(readme: string, meta?: GitHubRepoMetadata): str
 }
 
 function selectFallbackHook(templateType: TemplateType, meta: GitHubRepoMetadata): string {
-  const hay = `${meta.name} ${meta.description} ${meta.topics.join(' ')} ${meta.readmeExcerpt}`.toLowerCase();
+  const desc = (meta.description || '').toLowerCase();
+  const name = `${meta.fullName} ${meta.name}`.toLowerCase();
+  const topics = (meta.topics || []).map((t) => t.toLowerCase()).join(' ');
+  const coreHay = `${name} ${desc} ${topics}`;
   const upName = meta.name.toUpperCase();
+  const seed = (meta.name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) + (meta.stars || 0)) % 3;
 
   switch (templateType) {
     case 'ai-agent-automation': {
-      if (hay.includes('mcp') || hay.includes('cursor') || hay.includes('claude')) {
-        return `🔥 O SERVIDOR MCP QUE FALTAVA NO SEU AMBIENTE DE IA: ${upName}`;
+      if (coreHay.includes('mcp') || coreHay.includes('cursor') || coreHay.includes('claude')) {
+        const hooks = [
+          `🔥 CONECTE FERRAMENTAS REAIS AO SEU WORKFLOW COM O MCP ${upName}!`,
+          `⚡ SUPERPODERES PARA O CLAUDE E CURSOR: CONHEÇA O ${upName}!`,
+          `🧠 EXPANDA A CAPACIDADE DO SEU AGENTE COM O MCP ${upName}!`
+        ];
+        return hooks[seed];
       }
-      if (hay.includes('browser') || hay.includes('web') || hay.includes('navegador')) {
-        return `🌐 E SE SEU AGENTE DE IA GANHASSE UM NAVEGADOR PRÓPRIO COM O ${upName}?`;
+      if (coreHay.includes('browser') || coreHay.includes('navegador') || coreHay.includes('web')) {
+        return `🌐 DÊ UM NAVEGADOR E VISÃO PRÓPRIA PARA SEU AGENTE COM O ${upName}!`;
       }
-      if (hay.includes('memory') || hay.includes('memoria') || hay.includes('context')) {
-        return `🧠 O QUE ACONTECE QUANDO SEU AGENTE GANHA MEMÓRIA INFINITA COM ${upName}?`;
+      if (coreHay.includes('memory') || coreHay.includes('context') || coreHay.includes('memoria')) {
+        return `🧠 CONTEXTO E MEMÓRIA DE LONGO PRAZO PARA AGENTES COM O ${upName}!`;
       }
-      return `🤖 DÊ OLHOS, MÃOS E AUTONOMIA REAL PARA SEU AGENTE COM ${upName}!`;
+      const generalHooks = [
+        `🤖 DÊ AUTONOMIA E AÇÃO PRÁTICA PARA SEUS AGENTES COM ${upName}!`,
+        `⚡ ACELERE O DESENVOLVIMENTO DE AGENTES DE IA COM O ${upName}!`,
+        `🎯 ORQUESTRAÇÃO INTELIGENTE E SEM CAIXA-PRETA COM ${upName}!`
+      ];
+      return generalHooks[seed];
     }
 
     case 'self-hosted-saas': {
-      if (hay.includes('whatsapp') || hay.includes('zap') || hay.includes('wpp')) {
-        return `💸 E SE SEU WHATSAPP VIRASSE UM CRM COMPLETO NA SUA VPS COM ${upName}?`;
+      if (coreHay.includes('whatsapp') || coreHay.includes('crm') || coreHay.includes('atendimento')) {
+        const crmHooks = [
+          `💬 SEU PRÓPRIO SISTEMA DE ATENDIMENTO NO WHATSAPP COM ${upName}!`,
+          `💸 MULTIATENDIMENTO EM EQUIPE COM ZERO TAXA POR ASSENTO: ${upName}!`,
+          `🔓 LIBERDADE DE ATENDIMENTO: CONHEÇA O CRM OPEN SOURCE ${upName}!`
+        ];
+        return crmHooks[seed];
       }
-      if (
-        hay.includes('multiatendimento') ||
-        hay.includes('atendimento') ||
-        hay.includes('chatwoot') ||
-        hay.includes('ticket')
-      ) {
-        return `🔓 MULTIATENDIMENTO EM EQUIPE SEM PAGAR NENHUM ASSENTO COM ${upName}:`;
-      }
-      if (hay.includes('erp') || hay.includes('financeiro') || hay.includes('faturamento')) {
-        return `🏢 GESTÃO COMPLETA SEM MENSALIDADE: CONHEÇA O ${upName}!`;
-      }
-      return `🏢 CHEGA DE PAGAR MENSALIDADE EM DÓLAR: RODE O ${upName} NA SUA PRÓPRIA INFRA!`;
+      const saasHooks = [
+        `🏢 SOBERANIA DOS DADOS: RODE O ${upName} NA SUA PRÓPRIA VPS!`,
+        `🔓 ALTERNATIVA OPEN SOURCE A PLATAFORMAS PAGAS: ${upName}!`,
+        `🚀 ADEUS MENSALIDADES EM DÓLAR: ASSUMA O CONTROLE COM ${upName}!`
+      ];
+      return saasHooks[seed];
     }
 
     case 'infra-gateway': {
-      if (hay.includes('gateway') || hay.includes('proxy') || hay.includes('router') || hay.includes('roteador')) {
-        return `⚡ O GATEWAY QUE SALVA A VIDA DA SUA INFRAESTRUTURA: ${upName}!`;
+      if (coreHay.includes('gateway') || coreHay.includes('proxy') || coreHay.includes('router')) {
+        const gwHooks = [
+          `⚡ ROTEAMENTO INTELIGENTE E ALTA PERFORMANCE: ${upName}!`,
+          `🛡️ O GATEWAY RESILIENTE PARA SEUS MICROSSERVIÇOS: ${upName}!`,
+          `🚦 CONTROLE DE TRÁFEGO E FAILOVER AUTOMÁTICO COM ${upName}!`
+        ];
+        return gwHooks[seed];
       }
-      if (
-        hay.includes('secret') ||
-        hay.includes('auth') ||
-        hay.includes('token') ||
-        hay.includes('security') ||
-        hay.includes('senha')
-      ) {
-        return `🔒 E SE NENHUMA SENHA OU CHAVE DE API NUNCA MAIS VAZASSE COM O ${upName}?`;
+      if (coreHay.includes('secret') || coreHay.includes('auth') || coreHay.includes('token') || coreHay.includes('senha')) {
+        return `🔒 PROTEÇÃO E GESTÃO SEGURA DE CREDENCIAIS COM ${upName}!`;
       }
-      if (hay.includes('worker') || hay.includes('edge') || hay.includes('cloudflare')) {
-        return `🌐 EXECUÇÃO NA BORDA EM MILISSEGUNDOS: BLINDE SUA ARQUITETURA COM ${upName}!`;
-      }
-      return `🛡️ PARE DE SER ACORDADO DE MADRUGADA: O ${upName} BLINDA SUA INFRAESTRUTURA!`;
+      const infraHooks = [
+        `🌐 ALTA DISPONIBILIDADE E MENOS DOWNTIME COM O ${upName}!`,
+        `⚡ ESCALABILIDADE E BAIXA LATÊNCIA NA INFRAESTRUTURA: ${upName}!`,
+        `🛡️ BLINDE A ARQUITETURA DA SUA APLICAÇÃO COM O ${upName}!`
+      ];
+      return infraHooks[seed];
     }
 
     case 'app-tool': {
-      if (hay.includes('terminal') || hay.includes('cli') || hay.includes('tui')) {
-        return `🎯 RESOLVA ISSO DIRETO NO TERMINAL EM SEGUNDOS COM O ${upName}:`;
+      if (coreHay.includes('terminal') || coreHay.includes('cli') || coreHay.includes('tui')) {
+        return `🎯 RESOLVA ESSA TAREFA DIRETO NO TERMINAL COM O ${upName}!`;
       }
-      if (hay.includes('note') || hay.includes('markdown') || hay.includes('git') || hay.includes('doc')) {
-        return `📝 SEUS DADOS EM TEXTO PURO E SEM NUVEM OBRIGATÓRIA: TESTE O ${upName}!`;
+      if (coreHay.includes('note') || coreHay.includes('markdown') || coreHay.includes('doc')) {
+        return `📝 SEUS DADOS EM TEXTO PURO E 100% SOB SEU CONTROLE: ${upName}!`;
       }
-      if (hay.includes('electron') || hay.includes('lightweight') || hay.includes('fast') || hay.includes('rápido')) {
-        return `⚡ ADEUS APLICATIVOS PESADOS E CHEIOS DE TELEMETRIA: ${upName}!`;
-      }
-      return `🖥️ O CLIENTE / APP QUE VAI DESTRAVAR SUA PRODUTIVIDADE: ${upName}!`;
+      const appHooks = [
+        `🖥️ APLICATIVO LOCAL, RÁPIDO E SEM TELEMETRIA INVASIVA: ${upName}!`,
+        `⚡ PRODUTIVIDADE MÁXIMA E ZERO FRICÇÃO COM O ${upName}!`,
+        `🎯 A FERRAMENTA DIRETA AO PONTO QUE FALTAVA NA SUA ROTINA: ${upName}!`
+      ];
+      return appHooks[seed];
     }
 
     case 'dev-lib-cli':
     default: {
-      if (hay.includes('cli') || hay.includes('command') || hay.includes('terminal')) {
-        return `💻 O UTILITÁRIO DE TERMINAL QUE TODO DEV DEVERIA CONHECER: ${upName}!`;
+      if (coreHay.includes('cli') || coreHay.includes('terminal')) {
+        const cliHooks = [
+          `💻 O UTILITÁRIO DE TERMINAL QUE ACELERA SEU WORKFLOW: ${upName}!`,
+          `⚡ MENOS CLIQUES, MAIS VELOCIDADE NA LINHA DE COMANDO: ${upName}!`,
+          `🛠️ A CLI ENXUTA QUE RESOLVE O PROBLEMA EM 1 COMANDO: ${upName}!`
+        ];
+        return cliHooks[seed];
       }
-      if (hay.includes('sdk') || hay.includes('api client') || hay.includes('library') || hay.includes('framework')) {
-        return `🚀 A BIBLIOTECA QUE VAI TURBINAR SUA STACK EM POUCOS MINUTOS: ${upName}!`;
-      }
-      if (hay.includes('speed') || hay.includes('fast') || hay.includes('performance') || hay.includes('benchmark')) {
-        return `⚡ EXECUÇÃO EM MILISSEGUNDOS: COMO O ${upName} DESTRUIU O GARGALO!`;
-      }
-      return `🛠️ CANSADO DE ESCREVER 50 LINHAS DE CÓDIGO BOILERPLATE? O ${upName} RESOLVE!`;
+      const libHooks = [
+        `🚀 A BIBLIOTECA QUE VAI TURBINAR SUA STACK: ${upName}!`,
+        `🛠️ CANSADO DE ESCREVER BOILERPLATE? O ${upName} RESOLVE EM 1 LINHA!`,
+        `⚡ MÁXIMA PERFORMANCE E CÓDIGO LIMPO COM O ${upName}!`
+      ];
+      return libHooks[seed];
     }
   }
 }
 
 function selectFallbackIntro(templateType: TemplateType, meta: GitHubRepoMetadata, shortDesc: string): string {
   const lang = meta.language ? `desenvolvido em ${meta.language}` : 'open source';
+  const seed = (meta.name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 4;
+
   switch (templateType) {
-    case 'ai-agent-automation':
-      return `Se você constrói ou utiliza agentes autônomos no seu fluxo, vai pirar no ${meta.name}: ${shortDesc}`;
-    case 'self-hosted-saas':
-      return `Projetado para quem quer dar adeus às mensalidades em dólar e retomar o controle dos seus dados, o ${meta.name} é ${shortDesc}`;
-    case 'infra-gateway':
-      return `Construído especificamente para resolver gargalos de resiliência e tráfego crítico, o ${meta.name} (${lang}) entrega ${shortDesc}`;
-    case 'app-tool':
-      return `O ${meta.name} é uma daquelas ferramentas diretas ao ponto que você instala e não vive mais sem: ${shortDesc}`;
+    case 'ai-agent-automation': {
+      const options = [
+        `Para quem constrói e opera agentes de IA, o ${meta.name} surge como uma peça fundamental: ${shortDesc}`,
+        `O ${meta.name} expande a autonomia e a capacidade de execução prática dos seus agentes: ${shortDesc}`,
+        `Se o seu objetivo é automatizar tarefas e conectar ferramentas ao seu ecossistema de IA, o ${meta.name} resolve: ${shortDesc}`,
+        `Construído para dar superpoderes e contexto a fluxos inteligentes, o ${meta.name} entrega ${shortDesc}`
+      ];
+      return options[seed];
+    }
+    case 'self-hosted-saas': {
+      const options = [
+        `Uma alternativa open source direta para retomar a soberania dos seus dados, o ${meta.name} entrega ${shortDesc}`,
+        `Projetado para rodar na sua própria infraestrutura sem depender de mensalidades por usuário, o ${meta.name} é ${shortDesc}`,
+        `Com o ${meta.name}, você assume o controle total da sua operação sem bloqueios proprietários: ${shortDesc}`,
+        `Excelente solução self-hosted para equipes que prezam por privacidade e custo previsível: o ${meta.name} oferece ${shortDesc}`
+      ];
+      return options[seed];
+    }
+    case 'infra-gateway': {
+      const options = [
+        `Projetado para garantir estabilidade, segurança e alto throughput, o ${meta.name} (${lang}) entrega ${shortDesc}`,
+        `O ${meta.name} atua como uma camada robusta de proteção e controle de tráfego: ${shortDesc}`,
+        `Para quem precisa de resiliência e previsibilidade na arquitetura de microsserviços, o ${meta.name} oferece ${shortDesc}`,
+        `Desenvolvido para manter seus serviços operando com segurança e baixa latência, o ${meta.name} entrega ${shortDesc}`
+      ];
+      return options[seed];
+    }
+    case 'app-tool': {
+      const options = [
+        `O ${meta.name} é um utilitário direto ao ponto que resolve uma dor comum sem fricção: ${shortDesc}`,
+        `Leve, rápido e sem dependências ocultas, o ${meta.name} entrega exatamente o prometido: ${shortDesc}`,
+        `Uma daquelas ferramentas locais que simplificam o fluxo de trabalho no dia a dia: o ${meta.name} oferece ${shortDesc}`,
+        `Para quem valoriza privacidade e produtividade no próprio computador, o ${meta.name} resolve: ${shortDesc}`
+      ];
+      return options[seed];
+    }
     case 'dev-lib-cli':
-    default:
-      return `Se você desenvolve em ${meta.language || 'código aberto'} e preza por ergonomia sem peso extra, o ${meta.name} resolve: ${shortDesc}`;
+    default: {
+      const options = [
+        `Pensado para simplificar a vida de quem desenvolve em ${meta.language || 'código aberto'}, o ${meta.name} resolve: ${shortDesc}`,
+        `O ${meta.name} elimina boilerplate e entrega uma API limpa e moderna (${lang}): ${shortDesc}`,
+        `Uma adição certeira para o seu ambiente de desenvolvimento, o ${meta.name} entrega ${shortDesc}`,
+        `Com foco em performance e ergonomia para devs, o ${meta.name} oferece ${shortDesc}`
+      ];
+      return options[seed];
+    }
   }
 }
 
@@ -230,6 +288,12 @@ export function generateFallbackSummary(
   meta: GitHubRepoMetadata,
   preferredTemplate?: TemplateType
 ): GeneratedVisaoSummary {
+  const deterministicCheck = isHarmfulRepository(meta);
+  if (deterministicCheck.isHarmful) {
+    throw new Error(`Repositório recusado por violação das diretrizes de segurança (Moderação Git-Visão): ${deterministicCheck.harmReason}`);
+  }
+
+
   const templateType: TemplateType =
     preferredTemplate && TEMPLATE_VARIATIONS[preferredTemplate]
       ? preferredTemplate
@@ -467,6 +531,12 @@ export async function generateRepoVisaoSummary(
   env: Env,
   preferredTemplate?: TemplateType
 ): Promise<GeneratedVisaoSummary> {
+  const deterministicCheck = isHarmfulRepository(meta);
+  if (deterministicCheck.isHarmful) {
+    throw new Error(`Repositório recusado por violação das diretrizes de segurança (Moderação Git-Visão): ${deterministicCheck.harmReason}`);
+  }
+
+
   const baseUrl = env.OMNIROUTE_BASE_URL?.trim();
   const apiKey = env.OMNIROUTE_API_KEY?.trim();
   const model = env.OMNIROUTE_MODEL?.trim() || 'gemini-2.5-flash';
@@ -525,65 +595,13 @@ Você DEVE minerar os metadados e o README para extrair com precisão os 5 campo
 🎯 DIRETRIZES DE OURO (SEM MONOTONIA E COM FOCO EM UTILIDADE REAL)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. PROIBIÇÃO DE REPETIÇÃO MONÓTONA:
-- PROIBIDO começar todos os ganchos sempre com "E SE VOCÊ...". Cada categoria possui sua própria personalidade, dor principal e tom de chamada!
-- PROIBIDO começar "introText" sempre com "Conheça o <Nome>...". Varie o início para prender a atenção do leitor imediatamente.
+1. PROIBIÇÃO ABSOLUTA DE CLICHÊS E CÓPIAS LITERAIS:
+- PROIBIDO copiar exemplos do prompt! O campo "hookTitle" DEVE SER 100% EXCLUSIVO E ORIGINAL para cada repositório, refletindo a dor ou superpoder específico que ELE resolve.
+- NUNCA use as frases clichês: "O SERVIDOR MCP QUE FALTAVA", "O GATEWAY QUE SALVA A VIDA DA SUA INFRAESTRUTURA", "E SE NENHUMA SENHA OU CHAVE DE API NUNCA MAIS VAZASSE" ou "EXECUÇÃO NA BORDA EM MILISSEGUNDOS".
+- NUNCA comece "introText" com "Construído especificamente para resolver gargalos de resiliência e tráfego crítico" ou "Conheça o...". Escreva uma abertura direta, vibrante e adaptada ao projeto.
 
-2. GANCHOS ("hookTitle") IMPACTANTES E ESPECÍFICOS POR CATEGORIA:
-Deve ser SEMPRE em MAIÚSCULAS, iniciando com 1 emoji temático impactante. Escolha o gancho adequado ao nicho do projeto:
-
-* Agentes & Automação IA:
-  - "🤖 E SE SEU AGENTE DE IA GANHASSE UM NAVEGADOR SÓ PARA ELE?"
-  - "🧠 O QUE ACONTECE QUANDO SEU AGENTE GANHA MEMÓRIA INFINITA?"
-  - "🔥 O SERVIDOR MCP QUE FALTAVA NO SEU CURSOR / CLAUDE:"
-  - "⚡ DÊ OLHOS E MÃOS PARA SEU AGENTE DE IA COM O <NOME>:"
-  - "🎯 PARE DE COPIAR E COLAR: SEU AGENTE AGORA RESOLVE ISSO SOZINHO!"
-
-* SaaS & CRM Self-Hosted:
-  - "🏢 CHEGA DE PAGAR MENSALIDADE EM DÓLAR POR ATENDENTE!"
-  - "💸 E SE SEU WHATSAPP VIRASSE UM CRM COMPLETO NA SUA VPS?"
-  - "🔓 MULTIATENDIMENTO EM EQUIPE SEM PAGAR NENHUM ASSENTO:"
-  - "🛡️ SEUS DADOS, SEU BANCO: O SISTEMA QUE NENHUM SAAS PODE TE CANCELAR!"
-  - "🚀 MONTE SEU PRÓPRIO SISTEMA DE ATENDIMENTO COM ZERO MENSALIDADE:"
-
-* Infra, Gateways & Edge:
-  - "🛡️ PARE DE SER ACORDADO DE MADRUGADA POR SERVIÇO FORA DO AR!"
-  - "⚡ O GATEWAY QUE SALVA A VIDA DA SUA INFRAESTRUTURA:"
-  - "🔒 E SE NENHUMA SENHA OU CHAVE DE API NUNCA MAIS VAZASSE?"
-  - "🚦 ROTEAMENTO INTELIGENTE DE TRÁFEGO COM ZERO DOWNTIME:"
-  - "🌐 SUBA NA BORDA EM SEGUNDOS: O ESCUDO QUE FALTA NA SUA ARQUITETURA:"
-
-* Terminal, CLI & DX:
-  - "💻 O UTILITÁRIO DE TERMINAL QUE VAI TRANSFORMAR SEU WORKFLOW:"
-  - "⚡ ACELERE SEU FLUXO DE DESENVOLVIMENTO COM O <NOME>:"
-  - "🛠️ CANSADO DE BOILERPLATE? ESSA CLI RESOLVE EM 1 COMANDO!"
-  - "🚀 A FERRAMENTA DE DX QUE TODO DEV DEVERIA CONHECER:"
-
-* Frontend & UI Components:
-  - "🎨 A BIBLIOTECA DE COMPONENTES QUE SUA APLICAÇÃO PRECISAVA:"
-  - "✨ COMPONENTES ACESSÍVEIS E ULTRA-RÁPIDOS COM O <NOME>:"
-  - "🧩 MONTE UMA INTERFACE MODERNA EM POUCOS MINUTOS COM <NOME>:"
-
-* Scrapers & Engenharia de Dados:
-  - "🕷️ EXTRAÇÃO DE DADOS EM ALTA VELOCIDADE E SEM BLOQUEIO:"
-  - "📊 O PIPELINE DE DADOS OPEN SOURCE QUE SUBSTITUI FERRAMENTAS CARAS:"
-  - "⚡ COLETE E ESTRUTURE QUALQUER PÁGINA DA WEB COM O <NOME>:"
-
-* Cibersegurança & Pentest:
-  - "🔒 ENCONTRE VULNERABILIDADES ANTES QUE SEJAM EXPLORADAS:"
-  - "🛡️ O SCANNER DE SEGURANÇA QUE DEVE RODAR NA SUA INFRA HOJE:"
-  - "🕵️ AUDITORIA E PENTEST PROFISSIONAL COM CÓDIGO ABERTO:"
-
-* Apps & Produtividade:
-  - "🖥️ O CLIENTE / APLICATIVO QUE VAI DESTRAVAR SUA PRODUTIVIDADE:"
-  - "⚡ ADEUS APLICATIVOS PESADOS E CHEIOS DE TELEMETRIA:"
-  - "🎯 RESOLVA ISSO DIRETO NO SEU COMPUTADOR EM SEGUNDOS:"
-  - "📝 SUAS NOTAS E TAREFAS 100% SUAS, RÁPIDAS E SEM NUVEM OBRIGATÓRIA!"
-
-* Backend, Bancos & Storage:
-  - "💾 O BANCO DE DADOS RESILIENTE E RÁPIDO PARA SUA APLICAÇÃO:"
-  - "🗄️ PERSISTÊNCIA E STORAGE SEM REFÉM DE CLOUD PROVIDER:"
-  - "🚀 ORM E ENGINE DE DADOS DE ALTÍSSIMA PERFORMANCE:"
+2. GANCHOS ("hookTitle") IMPACTANTES:
+Deve ser SEMPRE em MAIÚSCULAS, iniciando com 1 emoji temático impactante. Crie uma chamada irresistível e única baseada nos diferenciais reais do repositório.
 
 3. MINERAÇÃO DO README POR DETALHES REAIS E CURIOSOS:
 NÃO gere resumos genéricos. O leitor do "Pega a Visão" ama FATOS TÉCNICOS E CURIOSIDADES REAIS extraídos do README:
@@ -673,6 +691,7 @@ Retorne APENAS o JSON válido com as chaves:
 
   try {
     const response = await fetch(endpoint, {
+      signal: AbortSignal.timeout(25000),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -709,7 +728,14 @@ Retorne APENAS o JSON válido com as chaves:
     const fallback = generateFallbackSummary(meta, preferredTemplate);
 
     const rawTemplate = String(parsed.templateType || '');
-    const templateType: TemplateType =
+    const isHarmful = Boolean(parsed.isHarmful) || deterministicCheck.isHarmful;
+    const harmReason = parsed.harmReason ? String(parsed.harmReason).trim() : (deterministicCheck.harmReason || '');
+    if (isHarmful) {
+      throw new Error(`Repositório recusado por violação das diretrizes de segurança (Moderação Git-Visão): ${harmReason || 'Repositório malicioso, ilegal ou danoso.'}`);
+    }
+
+
+  const templateType: TemplateType =
       preferredTemplate && TEMPLATE_VARIATIONS[preferredTemplate]
         ? preferredTemplate
         : (rawTemplate in TEMPLATE_VARIATIONS ? (rawTemplate as TemplateType) : fallback.templateType);

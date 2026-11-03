@@ -139,19 +139,51 @@ export function formatDatePtBr(isoDate: string): string {
 }
 
 export function detectTemplateType(meta: GitHubRepoMetadata): TemplateType {
-  const hay = `${meta.fullName} ${meta.description} ${meta.topics.join(' ')} ${meta.readmeExcerpt}`.toLowerCase();
-  if (/(gateway|worker|cloudflare|proxy|router|veroroute|omniroute|edge|docker|kubernetes|devops|servidor|cdn|tunnel|load-balancer|failover)/.test(hay)) {
-    return 'infra-gateway';
-  }
-  if (/(crm|wacrm|whatsapp|saas|self-hosted|selfhosted|erp|dashboard|painel|atendimento|multiatendimento|kanban|helpdesk|chatwoot)/.test(hay)) {
-    return 'self-hosted-saas';
-  }
-  if (/(agent|agente|browseros|mcp|autonomous|autônomo|cursor|claude|workflow|automation|automação|llm-agent|browser-use)/.test(hay)) {
+  const desc = (meta.description || '').toLowerCase();
+  const name = `${meta.fullName} ${meta.name}`.toLowerCase();
+  const topics = (meta.topics || []).map((t) => t.toLowerCase()).join(' ');
+  const snippet = (meta.readmeExcerpt || '').slice(0, 3000).toLowerCase();
+
+  const coreHay = `${name} ${desc} ${topics}`;
+  const fullHay = `${coreHay} ${snippet}`;
+
+  // 1. Agentes & Automação IA / MCP / Skills / Harnesses (Prioridade Máxima)
+  if (
+    /(mcp|model[- ]context[- ]protocol|claude[- ]skill|ai[- ]agent|autonomous[- ]agent|browser[- ]use|agentic|superagent)/.test(coreHay) ||
+    /(agent|agente|mcp|autonomous|autônomo|cursor|claude|skill|harness|workflow|automation|automação|llm-agent|browser-use|langchain|langgraph|crewai|autogen)/.test(coreHay) ||
+    /(mcp[- ]server|autonomous agent|ai agent|multi-agent|claude skill|agent harness)/.test(fullHay)
+  ) {
     return 'ai-agent-automation';
   }
-  if (/(sdk|cli|library|biblioteca|framework|package|npm|pip|cargo|plugin|hook|api client| compiler|runtime| ORM )/.test(hay)) {
+
+  // 2. SaaS, CRM & Self-Hosted
+  if (
+    /(crm|wacrm|whatsapp|saas|self-hosted|selfhosted|erp|multiatendimento|helpdesk|chatwoot|painel de atendimento|sistema de tickets)/.test(coreHay) ||
+    /(self-hosted|selfhosted|multiatendimento|whatsapp crm|painel administrativo)/.test(fullHay)
+  ) {
+    return 'self-hosted-saas';
+  }
+
+  // 3. Biblioteca, SDK, Framework & CLI (Dev Tools)
+  if (
+    /(sdk|cli|library|biblioteca|framework|package|npm|pip|cargo|plugin|hook|api[- ]client|compiler|runtime|\borm\b|linter|bundler|tui|terminal)/.test(coreHay)
+  ) {
     return 'dev-lib-cli';
   }
+
+  // 4. Infra, Gateways & Edge (Exige termos compostos específicos para evitar falsos positivos com simples menções a docker/server)
+  if (
+    /(api[- ]gateway|gateway|reverse[- ]proxy|load[- ]balancer|cloudflare[- ]worker|failover|traefik|caddy|nginx|service[- ]mesh|tunneling|tunnel)/.test(coreHay) ||
+    /(api gateway|reverse proxy|load balancer|failover proxy|roteamento de tráfego|cloudflare worker|edge computing)/.test(fullHay)
+  ) {
+    return 'infra-gateway';
+  }
+
+  // 5. Fallback secundário
+  if (/(sdk|cli|library|framework|package|npm|cargo|plugin)/.test(fullHay)) {
+    return 'dev-lib-cli';
+  }
+
   return 'app-tool';
 }
 

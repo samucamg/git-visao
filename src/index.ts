@@ -426,6 +426,15 @@ export default {
             return jsonResponse({ ok: true, cached: true, repo: existing });
           }
           const meta = await fetchGitHubRepoMetadata(parsed.fullName, effectiveEnv.GITHUB_TOKEN);
+          if (meta.isHarmful) {
+            return jsonResponse(
+              {
+                ok: false,
+                error: 'Repositório bloqueado por conter conteúdo potencialmente danoso ou malicioso'
+              },
+              400
+            );
+          }
           const summary = await generateRepoVisaoSummary(meta, effectiveEnv, b.templateType);
           const saved = await upsertRepository(env.DB, meta, summary, env);
           return jsonResponse({ ok: true, cached: false, repo: saved });

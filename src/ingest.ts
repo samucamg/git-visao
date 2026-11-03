@@ -333,6 +333,10 @@ async function processCandidate(
       meta = await deps.fetchMeta(probe.fullName);
       budget.units += FULL_COST;
     }
+    if (meta.isHarmful) {
+      await log('ignored', 'harmful_content', common);
+      return 'ok';
+    }
     const generated = await deps.summarize(meta);
     await deps.save(meta, generated);
     await log('added', `Open source (${spdx || licenseType}).`, common);

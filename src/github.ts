@@ -1,5 +1,40 @@
 import type { CostModel, DeployDifficulty, GitHubRepoMetadata, LicenseType } from './types.ts';
 
+export function isHarmfulRepository(meta: GitHubRepoMetadata): { isHarmful: boolean; harmReason?: string } {
+  const text = `${meta.fullName || ''} ${meta.description || ''} ${meta.readmeExcerpt || ''} ${(meta.topics || []).join(' ')}`.toLowerCase();
+
+  const harmfulPatterns = [
+    {
+      pattern: /\b(malware|trojan|ransomware|c2|command and control|rat|remote access trojan|rootkit|keylogger|credential stealer|token grabber|phishing)\b/i,
+      reason: 'Contém indicadores óbvios de malware, trojan, ransomware, keylogger ou phishing.'
+    },
+    {
+      pattern: /\b(exploit kit|0-day|zero-day exploit|buffer overflow exploit|shellcode)\b/i,
+      reason: 'Incentiva ou fornece exploits / kits de exploração maliciosos.'
+    },
+    {
+      pattern: /\b(botnet|ddos tool|dos tool|stressor|booter|stresser)\b/i,
+      reason: 'Relacionado a botnets ou ferramentas de ataque de negação de serviço (DDoS/DoS).'
+    },
+    {
+      pattern: /\b(bypass antivirus|evade antivirus|av evasion|edr bypass|malicious payload|malicious loader)\b/i,
+      reason: 'Foco em evasão de antivírus/EDR ou injeção de payload malicioso.'
+    },
+    {
+      pattern: /\b(carding|cc generator|cvv checker|sql injection scanner malicious|defacement)\b/i,
+      reason: 'Atividades ilícitas como carding, testes maliciosos não autorizados ou defacement.'
+    }
+  ];
+
+  for (const item of harmfulPatterns) {
+    if (item.pattern.test(text)) {
+      return { isHarmful: true, harmReason: item.reason };
+    }
+  }
+
+  return { isHarmful: false };
+}
+
 export interface LicenseClassification {
   licenseSpdx: string;
   licenseType: LicenseType;
@@ -558,6 +593,13 @@ export async function fetchGitHubRepoMetadata(
   const repoKey = fullName.toLowerCase();
   const repoUrl = repoData.html_url || `https://github.com/${fullName}`;
 
+  const harmful = isHarmfulRepository({
+    fullName,
+    description: repoData.description || '',
+    readmeExcerpt,
+    topics: Array.isArray(repoData.topics) ? repoData.topics : []
+  });
+
   return {
     repoKey,
     fullName,
@@ -590,7 +632,11 @@ export async function fetchGitHubRepoMetadata(
     cost_notes: costClassification.costNotes,
     deploy_difficulty: deployClassification.deployDifficulty,
     deploy_badge: deployClassification.deployBadge,
-    deploy_method: deployClassification.deployMethod
+    deploy_method: deployClassification.deployMethod,
+    isHarmful: harmful.isHarmful,
+    harmReason: harmful.harmReason,
+    is_harmful: harmful.isHarmful ? 1 : 0,
+    harm_reason: harmful.harmReason || ''
   };
 }
 
