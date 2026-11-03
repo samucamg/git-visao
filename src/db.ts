@@ -1,3 +1,6 @@
+import { detectTemplateType, detectCategory } from './templates.ts';
+import { generateFallbackSummary } from './ai.ts';
+import { isHarmfulRepository } from './github.ts';
 import { SEED_REPOSITORIES } from './seed.ts';
 import type {
   Env,
@@ -188,25 +191,8 @@ export async function ensureDatabaseInitialized(db: D1Database, env?: Env): Prom
     await db.prepare(indexSql).run();
   }
 
-  // Data Auto Healing v1: remove maliciosos e corrige templates/copies corrompidos ou repetitivos
-  const healingCheck = await db.prepare('SELECT value FROM app_settings WHERE key = ?').bind('data_auto_healing_v1').first<{ value: string }>();
-  if (!healingCheck || healingCheck.value !== 'applied') {
-    await db.prepare("DELETE FROM repositories WHERE repo_key IN ('shadowhackrs/gmail-account-creator', 'snailsploit/claude-red') OR LOWER(full_name) LIKE '%shadowhackrs/gmail-account-creator%' OR LOWER(full_name) LIKE '%snailsploit/claude-red%'").run();
-    await db.prepare(`
-      UPDATE repositories
-      SET template_type = 'ai-agent-automation',
-          hook_title = '⚡ Gerenciamento e Execução Confiável com Agentes de IA',
-          intro_text = 'Arquitetura moderna para automação de fluxos e orquestração de agentes autônomos com alta resiliência.'
-      WHERE repo_key IN ('amosblomqvist/learnharness', 'jakeschincariol/replica-skill')
-         OR hook_title = '🔒 E SE NENHUMA SENHA OU CHAVE DE API NUNCA MAIS VAZASSE...'
-         OR intro_text LIKE 'Construído especificamente para resolver gargalos de resiliência%'
-    `).run();
-    await db.prepare(`
-      INSERT INTO app_settings (key, value, updated_at)
-      VALUES ('data_auto_healing_v1', 'applied', datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET value = 'applied', updated_at = datetime('now')
-    `).run();
-  }
+  // Auto-healing de dados v2: exclusão de repos maliciosos e regeneração dinâmica de copies
+  await runDataAutoHealing(db, env);
 
   const countRow = await db
     .prepare('SELECT COUNT(*) as total FROM repositories')
@@ -1055,4 +1041,163 @@ export async function getRuntimeSettings(
   }
 
   return resolved;
+}
+
+export async function runDataAutoHealing(db: D1Database, env?: Env): Promise<void> {
+  try {
+    const healingCheck = await db
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .bind('data_auto_healing_v3')
+      .first<{ value: string }>();
+
+    if (healingCheck && healingCheck.value === 'applied') {
+      return;
+    }
+
+    const kv = getKV(env);
+
+    // 1. Deletar repositórios maliciosos/danosos/scam
+    const maliciousKeys = [
+      'shadowhackrs/gmail-account-creator',
+      'snailsploit/claude-red',
+      'evogix/evil-ollama'
+    ];
+
+    for (const key of maliciousKeys) {
+      await db
+        .prepare("DELETE FROM repositories WHERE repo_key = ? OR LOWER(full_name) LIKE ?")
+        .bind(key, `%${key}%`)
+        .run();
+      if (kv) {
+        try { await kv.delete(`repo:${key}`); } catch {}
+      }
+    }
+
+    // 2. Buscar repositórios no D1 para corrigir
+    const rows = await db
+      .prepare('SELECT id, repo_key, full_name, owner, name, repo_url, description, stars, forks, language, topics_json, last_commit_at, category, template_type, hook_title, intro_text FROM repositories')
+      .all<RepoRecord>();
+
+    if (rows && Array.isArray(rows.results)) {
+      for (const r of rows.results) {
+        let topics: string[] = [];
+        try {
+          topics = JSON.parse(r.topics_json || '[]');
+        } catch {
+          topics = [];
+        }
+
+        const meta: GitHubRepoMetadata = {
+          fullName: r.full_name,
+          owner: r.owner,
+          name: r.name,
+          repoUrl: r.repo_url,
+          description: r.description || '',
+          stars: Number(r.stars || 0),
+          forks: Number(r.forks || 0),
+          language: r.language || '',
+          topics,
+          openIssues: 0,
+          updatedAt: r.last_commit_at || new Date().toISOString(),
+          readmeExcerpt: ''
+        };
+
+        // Verifica se é malicioso
+        const safety = isHarmfulRepository(meta);
+        if (safety.isHarmful) {
+          await db.prepare('DELETE FROM repositories WHERE id = ?').bind(r.id).run();
+          if (kv) {
+            try { await kv.delete(`repo:${r.repo_key}`); } catch {}
+          }
+          continue;
+        }
+
+        const hook = (r.hook_title || '').toUpperCase();
+        const intro = (r.intro_text || '').toLowerCase();
+
+        const needsHealing =
+          intro.includes('gargalo') ||
+          intro.includes('resili') ||
+          hook.includes('VAZASSE') ||
+          hook.includes('GATEWAY QUE SALVA') ||
+          hook.includes('EXECUÇÃO NA BORDA') ||
+          hook.includes('EXECUCAO NA BORDA') ||
+          hook.includes('SERVIDOR MCP QUE FALTAVA') ||
+          hook.includes('GERENCIAMENTO E EXECU') ||
+          (r.template_type === 'infra-gateway' && r.category !== 'Infra, Gateways & Edge');
+
+        if (needsHealing) {
+          const newTemplate = detectTemplateType(meta);
+          const newCategory = detectCategory(meta, newTemplate);
+          const newSummary = generateFallbackSummary(meta, newTemplate);
+
+          await db
+            .prepare(`
+              UPDATE repositories
+              SET category = ?,
+                  template_type = ?,
+                  hook_title = ?,
+                  intro_text = ?,
+                  features_json = ?,
+                  scenario_title = ?,
+                  scenario_intro = ?,
+                  scenario_prompt = ?,
+                  scenario_steps_json = ?,
+                  killer_title = ?,
+                  killer_text = ?,
+                  summary_text = ?,
+                  punchline = ?,
+                  whatsapp_text = ?,
+                  updated_at = datetime('now')
+              WHERE id = ?
+            `)
+            .bind(
+              newCategory,
+              newTemplate,
+              newSummary.hookTitle,
+              newSummary.introText,
+              JSON.stringify(newSummary.features),
+              newSummary.scenarioTitle,
+              newSummary.scenarioIntro,
+              newSummary.scenarioPrompt,
+              JSON.stringify(newSummary.scenarioSteps),
+              newSummary.killerTitle,
+              newSummary.killerText,
+              newSummary.summaryText,
+              newSummary.punchline,
+              newSummary.whatsappText,
+              r.id
+            )
+            .run();
+
+          if (kv) {
+            try {
+              await kv.delete(`repo:${r.repo_key}`);
+            } catch {}
+          }
+        }
+      }
+    }
+
+    // 3. Marca como aplicado para não reexecutar
+    await db
+      .prepare(`
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES ('data_auto_healing_v3', 'applied', datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = 'applied', updated_at = datetime('now')
+      `)
+      .run();
+
+    await db
+      .prepare(`
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES ('data_auto_healing_v1', 'applied', datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = 'applied', updated_at = datetime('now')
+      `)
+      .run();
+
+    console.log('[AutoHealing] data_auto_healing_v3 aplicado com sucesso.');
+  } catch (err) {
+    console.error('[AutoHealing] Erro ao executar auto-healing v3:', err);
+  }
 }
