@@ -670,7 +670,7 @@ const PUBLIC_TEMPLATE = `<!DOCTYPE html>
       if (searchQuery.trim()) p.set('q', searchQuery.trim());
       if (activeCategory) p.set('category', activeCategory);
       if (!reset && nextCursor) p.set('cursor', nextCursor);
-      return fetch('/api/repos?' + p.toString(), { signal: controller.signal }).then(function (res) {
+      return fetch('/api/repos?' + p.toString(), { cache: 'no-store', signal: controller.signal }).then(function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json();
       }).then(function (data) {
@@ -791,7 +791,7 @@ const PUBLIC_TEMPLATE = `<!DOCTYPE html>
       var btn = $('check-submit-btn');
       var t = I18N_DICT[currentLang] || I18N_DICT['pt'];
       btn.disabled = true; btn.textContent = t.checkVerifying;
-      fetch('/api/check?repo=' + encodeURIComponent(raw) + '&lang=' + encodeURIComponent(currentLang)).then(function (res) {
+      fetch('/api/check?repo=' + encodeURIComponent(raw) + '&lang=' + encodeURIComponent(currentLang), { cache: 'no-store' }).then(function (res) {
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (r) {
         $('check-exists-panel').classList.add('hidden'); $('check-not-found-panel').classList.add('hidden');
