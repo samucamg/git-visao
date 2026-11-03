@@ -188,6 +188,26 @@ export async function ensureDatabaseInitialized(db: D1Database, env?: Env): Prom
     await db.prepare(indexSql).run();
   }
 
+  // Data Auto Healing v1: remove maliciosos e corrige templates/copies corrompidos ou repetitivos
+  const healingCheck = await db.prepare('SELECT value FROM app_settings WHERE key = ?').bind('data_auto_healing_v1').first<{ value: string }>();
+  if (!healingCheck || healingCheck.value !== 'applied') {
+    await db.prepare("DELETE FROM repositories WHERE repo_key IN ('shadowhackrs/gmail-account-creator', 'snailsploit/claude-red') OR LOWER(full_name) LIKE '%shadowhackrs/gmail-account-creator%' OR LOWER(full_name) LIKE '%snailsploit/claude-red%'").run();
+    await db.prepare(`
+      UPDATE repositories
+      SET template_type = 'ai-agent-automation',
+          hook_title = '⚡ Gerenciamento e Execução Confiável com Agentes de IA',
+          intro_text = 'Arquitetura moderna para automação de fluxos e orquestração de agentes autônomos com alta resiliência.'
+      WHERE repo_key IN ('amosblomqvist/learnharness', 'jakeschincariol/replica-skill')
+         OR hook_title = '🔒 E SE NENHUMA SENHA OU CHAVE DE API NUNCA MAIS VAZASSE...'
+         OR intro_text LIKE 'Construído especificamente para resolver gargalos de resiliência%'
+    `).run();
+    await db.prepare(`
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ('data_auto_healing_v1', 'applied', datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value = 'applied', updated_at = datetime('now')
+    `).run();
+  }
+
   const countRow = await db
     .prepare('SELECT COUNT(*) as total FROM repositories')
     .first<{ total: number }>();

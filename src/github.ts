@@ -1,6 +1,6 @@
 import type { CostModel, DeployDifficulty, GitHubRepoMetadata, LicenseType } from './types.ts';
 
-export function isHarmfulRepository(meta: GitHubRepoMetadata): { isHarmful: boolean; harmReason?: string } {
+export function isHarmfulRepository(meta: Partial<GitHubRepoMetadata>): { isHarmful: boolean; harmReason?: string } {
   const text = `${meta.fullName || ''} ${meta.description || ''} ${meta.readmeExcerpt || ''} ${(meta.topics || []).join(' ')}`.toLowerCase();
 
   const harmfulPatterns = [
