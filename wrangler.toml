@@ -6,6 +6,11 @@ compatibility_flags = ["nodejs_compat"]
 # keep_vars evita que deploys do GitHub removam variaveis e segredos configurados no Cloudflare Dashboard
 keep_vars = true
 
+# Arquivos estáticos da home (CSS, JS, imagens e vídeo gerados com Higgsfield)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
 [observability]
 enabled = true
 

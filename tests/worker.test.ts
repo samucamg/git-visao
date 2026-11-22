@@ -278,6 +278,41 @@ function createInMemoryD1(): D1Database {
           return { results, success: true, meta: {} };
         }
 
+        // Consultas do motor de busca novo (src/search.ts)
+        if (normalizedSql.startsWith('SELECT * FROM repositories WHERE id IN (')) {
+          const ids = new Set(boundArgs.map((v) => Number(v)));
+          const results = Array.from(rows.values()).filter((r) => ids.has(Number(r.id))) as unknown as T[];
+          return { results, success: true, meta: {} };
+        }
+        if (normalizedSql.startsWith('SELECT category AS k') || normalizedSql.startsWith('SELECT language AS k')) {
+          const field = normalizedSql.startsWith('SELECT category') ? 'category' : 'language';
+          const counts = new Map<string, number>();
+          for (const r of rows.values()) {
+            const k = String((r as unknown as Record<string, unknown>)[field] || '');
+            if (!k) continue;
+            counts.set(k, (counts.get(k) || 0) + 1);
+          }
+          const results = Array.from(counts.entries()).map(([k, n]) => ({ k, n })) as unknown as T[];
+          return { results, success: true, meta: {} };
+        }
+        if (normalizedSql.startsWith('SELECT id, repo_key')) {
+          let list = Array.from(rows.values());
+          let i = 0;
+          if (normalizedSql.includes('category = ?')) {
+            const cat = String(boundArgs[i++] || '');
+            list = list.filter((r) => r.category === cat);
+          }
+          if (normalizedSql.includes('LOWER(language) = ?')) {
+            const lang = String(boundArgs[i++] || '');
+            list = list.filter((r) => String(r.language || '').toLowerCase() === lang);
+          }
+          if (normalizedSql.includes('stars >= ?')) {
+            const min = Number(boundArgs[i++] || 0);
+            list = list.filter((r) => Number(r.stars) >= min);
+          }
+          return { results: list as unknown as T[], success: true, meta: {} };
+        }
+
         if (normalizedSql.startsWith('SELECT * FROM repositories')) {
           let list = Array.from(rows.values());
           let argIndex = 0;
@@ -1373,7 +1408,7 @@ test('12. Rota /admin e Verificação de Senha (/api/auth/verify)', async () => 
   const homeRes = await worker.fetch(new Request('https://gitvisao.local/'), env);
   assert.equal(homeRes.status, 200);
   const home = await homeRes.text();
-  assert.ok(home.includes('check-not-found-panel'));
+  assert.ok(home.includes('check-panel'));
   for (const adminOnly of ['admin-password-input', 'settings-modal', 'generate-submit-btn', 'Área Administrativa']) {
     assert.ok(!home.includes(adminOnly), 'home pública não deve conter ' + adminOnly);
   }

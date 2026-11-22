@@ -29,7 +29,18 @@ import { createIngestDeps } from './ingest-deps.ts';
 import { reviewIngestItem, runIngest } from './ingest.ts';
 import type { Env, RuntimeSettings, TemplateType } from './types.ts';
 import { renderAdminHtml } from './ui-admin.ts';
-import { renderPublicHtml } from './ui-public.ts';
+import { renderPublicHtml, type PublicPageMeta } from './ui-public.ts';
+import { searchRepositories } from './search.ts';
+import {
+  getBotConfig,
+  getEvolutionWebhook,
+  handleBotWebhook,
+  maskBotConfig,
+  registerEvolutionWebhook,
+  saveBotConfig,
+  type BotConfigPatch
+} from './bot.ts';
+import { getPromoConfig, savePromoConfig, type PromoConfigPatch } from './promo.ts';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -41,16 +52,44 @@ const HTML_HEADERS: Record<string, string> = {
   'Content-Type': 'text/html; charset=utf-8',
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'no-referrer'
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Frame-Options': 'DENY'
 };
 
 const INGEST_STATUSES: IngestStatus[] = ['requested', 'pending', 'error', 'ignored', 'added'];
 
-function jsonResponse(data: unknown, status = 200): Response {
+function jsonResponse(data: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS }
+    headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS, ...extra }
   });
+}
+
+// Proteções "best effort" por isolate (sem custo de D1/KV): limita tentativas de senha e
+// pedidos de visitantes gravados no banco. Reinicia quando o isolate é reciclado.
+const hits = new Map<string, { n: number; until: number }>();
+function tooMany(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const cur = hits.get(key);
+  if (!cur || cur.until < now) {
+    if (hits.size > 5000) hits.clear();
+    hits.set(key, { n: 1, until: now + windowMs });
+    return false;
+  }
+  cur.n += 1;
+  return cur.n > max;
+}
+function clientIp(request: Request): string {
+  return request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'local';
+}
+
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function clip(text: string, max: number): string {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
 
 function safeParseRepo(input: string) {
@@ -233,6 +272,41 @@ async function handleAdminApi(
     return jsonResponse(result, result.ok ? 200 : 422);
   }
 
+  // Bot do grupo (WhatsApp)
+  if (pathname === '/api/admin/bot/config') {
+    if (request.method === 'POST') {
+      const body = await readJson<BotConfigPatch>(request);
+      const saved = await saveBotConfig(env.DB, body, env);
+      return jsonResponse({ ok: true, bot: maskBotConfig(saved) });
+    }
+    const bot = await getBotConfig(env.DB, env);
+    return jsonResponse({ ok: true, bot: maskBotConfig(bot) });
+  }
+  if (request.method === 'GET' && pathname === '/api/admin/bot/webhook') {
+    return jsonResponse(await getEvolutionWebhook(env.DB, env));
+  }
+  if (request.method === 'POST' && pathname === '/api/admin/bot/webhook/register') {
+    const body = await readJson<{ url?: string }>(request);
+    const bot = await getBotConfig(env.DB, env);
+    const origin = new URL(request.url).origin;
+    const url =
+      typeof body.url === 'string' && /^https:\/\//.test(body.url.trim())
+        ? body.url.trim()
+        : `${origin}/api/bot/webhook/${bot.secret}`;
+    const result = await registerEvolutionWebhook(env.DB, env, url);
+    return jsonResponse({ ...result, url }, result.ok ? 200 : 502);
+  }
+
+  // Divulgação (canal + vídeos em destaque)
+  if (pathname === '/api/admin/promo') {
+    if (request.method === 'POST') {
+      const body = await readJson<PromoConfigPatch>(request);
+      const promo = await savePromoConfig(env.DB, body, env);
+      return jsonResponse({ ok: true, promo });
+    }
+    return jsonResponse({ ok: true, promo: await getPromoConfig(env.DB, env) });
+  }
+
   // `settings` fica referenciado para futuras rotas que precisem dele.
   void settings;
   return null;
@@ -251,14 +325,81 @@ export default {
       // 1. Páginas: home pública (só consulta) e /admin (toda a gestão)
       if (request.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
         let title = env.PUBLIC_APP_TITLE;
+        let promo = null;
+        let meta: PublicPageMeta | undefined;
         if (env.DB) {
           try {
             title = (await loadEffectiveContext(env)).effectiveEnv.PUBLIC_APP_TITLE;
+            promo = await getPromoConfig(env.DB, env);
+            // Link de um repositório (?repo=owner/name): prévia própria no WhatsApp/redes.
+            const repoParam = safeParseRepo(searchParams.get('repo') || '');
+            if (repoParam) {
+              const repo = await findRepoByKey(env.DB, repoParam.repoKey, env, 'pt');
+              if (repo) {
+                const canonical = `${url.origin}/?repo=${repo.full_name}`;
+                meta = {
+                  pageTitle: `${repo.full_name} • GitVisão`,
+                  description: clip(`${repo.hook_title} — ${repo.intro_text || repo.description}`, 220),
+                  url: canonical,
+                  jsonLd: {
+                    '@context': 'https://schema.org',
+                    '@type': 'SoftwareSourceCode',
+                    name: repo.full_name,
+                    description: clip(repo.description || repo.intro_text, 300),
+                    codeRepository: repo.repo_url,
+                    programmingLanguage: repo.language || undefined,
+                    url: canonical
+                  }
+                };
+              }
+            }
           } catch {
             // usa o valor do ambiente
           }
         }
-        return new Response(renderPublicHtml(title), { status: 200, headers: HTML_HEADERS });
+        return new Response(renderPublicHtml(title, { promo, meta, origin: url.origin }), {
+          status: 200,
+          headers: HTML_HEADERS
+        });
+      }
+
+      if (request.method === 'GET' && pathname === '/robots.txt') {
+        return new Response(
+          `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: ${url.origin}/sitemap.xml\n`,
+          { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' } }
+        );
+      }
+
+      if (request.method === 'GET' && pathname === '/sitemap.xml') {
+        await ensureDatabaseInitialized(env.DB, env);
+        const rows = await env.DB
+          .prepare('SELECT full_name, updated_at FROM repositories ORDER BY updated_at DESC LIMIT 5000')
+          .all<{ full_name: string; updated_at: string }>();
+        const urls = [`<url><loc>${escapeXml(url.origin)}/</loc><changefreq>daily</changefreq></url>`].concat(
+          (rows.results ?? []).map((r) => {
+            const day = String(r.updated_at || '').slice(0, 10);
+            const lastmod = /^\d{4}-\d{2}-\d{2}$/.test(day) ? `<lastmod>${day}</lastmod>` : '';
+            return `<url><loc>${escapeXml(`${url.origin}/?repo=${r.full_name}`)}</loc>${lastmod}</url>`;
+          })
+        );
+        return new Response(
+          `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`,
+          { headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' } }
+        );
+      }
+
+      // Divulgação pública (canal + vídeos) para clientes externos
+      if (request.method === 'GET' && pathname === '/api/promo') {
+        await ensureDatabaseInitialized(env.DB, env);
+        return jsonResponse({ ok: true, promo: await getPromoConfig(env.DB, env) }, 200, {
+          'Cache-Control': 'public, max-age=300'
+        });
+      }
+
+      // Webhook do bot do grupo (Evolution API). O segredo no caminho autentica a chamada.
+      if (request.method === 'POST' && pathname.startsWith('/api/bot/webhook/')) {
+        await ensureDatabaseInitialized(env.DB, env);
+        return handleBotWebhook(request, env);
       }
       if (request.method === 'GET' && pathname === '/admin') {
         return new Response(renderAdminHtml(env.OMNIROUTE_MODEL), {
@@ -280,7 +421,7 @@ export default {
         if (!cacheUrl.searchParams.has('lang')) {
           cacheUrl.searchParams.set('lang', lang);
         }
-        const cacheKey = new Request(cacheUrl.toString(), request);
+        const cacheKey = new Request(cacheUrl.toString(), { method: 'GET' });
         const cache = typeof caches !== 'undefined' ? caches.default : null;
         if (cache) {
           const cachedResponse = await cache.match(cacheKey);
@@ -289,24 +430,40 @@ export default {
           }
         }
 
-        await loadEffectiveContext(env);
+        // Só garante o banco; as configurações (senha, chaves) não são necessárias aqui.
+        await ensureDatabaseInitialized(env.DB, env);
         const sortParam = searchParams.get('sort');
         const sort =
-          sortParam === 'stars' || sortParam === 'name' || sortParam === 'recent'
+          sortParam === 'stars' || sortParam === 'name' || sortParam === 'recent' || sortParam === 'relevance'
             ? sortParam
-            : 'recent';
+            : undefined;
         const limitParam = searchParams.get('limit');
-        const data = await listRepositories(env.DB, {
-          q: searchParams.get('q') || undefined,
-          category: searchParams.get('category') || undefined,
-          templateType:
-            searchParams.get('template') || searchParams.get('templateType') || undefined,
-          sort,
-          limit: limitParam ? Number(limitParam) : 30,
-          cursor: searchParams.get('cursor') || undefined,
-          lang
+        const templateType = searchParams.get('template') || searchParams.get('templateType');
+        const data = templateType
+          ? await listRepositories(env.DB, {
+              q: searchParams.get('q') || undefined,
+              category: searchParams.get('category') || undefined,
+              templateType,
+              sort: sort === 'relevance' || !sort ? 'recent' : sort,
+              limit: limitParam ? Number(limitParam) : 30,
+              cursor: searchParams.get('cursor') || undefined,
+              lang
+            })
+          : await searchRepositories(env.DB, {
+              q: searchParams.get('q') || undefined,
+              category: searchParams.get('category') || undefined,
+              language: searchParams.get('language') || undefined,
+              minStars: Number(searchParams.get('minStars') || 0) || undefined,
+              recentDays: Number(searchParams.get('recentDays') || 0) || undefined,
+              sort,
+              limit: limitParam ? Number(limitParam) : 30,
+              cursor: searchParams.get('cursor') || undefined,
+              lang
+            });
+        // Cache curto na borda: catálogo novo aparece em no máximo 2 minutos.
+        const resp = jsonResponse({ ok: true, ...data }, 200, {
+          'Cache-Control': 'public, max-age=30, s-maxage=120'
         });
-        const resp = jsonResponse({ ok: true, ...data });
         if (cache && ctx) {
           ctx.waitUntil(cache.put(cacheKey, resp.clone()));
         }
@@ -327,9 +484,10 @@ export default {
           );
         }
         const lang = searchParams.get('lang') || 'pt';
-        await loadEffectiveContext(env);
+        await ensureDatabaseInitialized(env.DB, env);
         const existing = await findRepoByKey(env.DB, parsed.repoKey, env, lang);
-        if (!existing) {
+        // Só anota o pedido para a curadoria dentro de um limite por IP (evita encher a fila).
+        if (!existing && !tooMany(`check:${clientIp(request)}`, 15, 60 * 60 * 1000)) {
           await recordVisitorRequest(env.DB, parsed.repoKey, parsed.fullName);
         }
         return jsonResponse({
@@ -360,10 +518,20 @@ export default {
           typeof (body.currentPassword ?? body.password) === 'string'
             ? String(body.currentPassword ?? body.password)
             : undefined;
-        const authorized = await verifyAdminPassword(
-          extractAdminPassword(request, bodyPassword),
-          settings.adminPassword
-        );
+        const ipKey = `auth:${clientIp(request)}`;
+        const lock = hits.get(ipKey);
+        if (lock && lock.n >= 8 && lock.until > Date.now()) {
+          return jsonResponse(
+            { ok: false, error: 'Muitas tentativas de senha. Aguarde 15 minutos.' },
+            429,
+            { 'Cache-Control': 'no-store' }
+          );
+        }
+        const providedPassword = extractAdminPassword(request, bodyPassword);
+        const authorized = await verifyAdminPassword(providedPassword, settings.adminPassword);
+        // Conta só tentativas com senha enviada (chamadas sem senha não são força bruta).
+        if (authorized) hits.delete(ipKey);
+        else if (providedPassword) tooMany(ipKey, 8, 15 * 60 * 1000);
 
         if (pathname === '/api/auth/verify') {
           return authorized
@@ -476,8 +644,25 @@ export default {
 
       return jsonResponse({ ok: false, error: 'Rota não encontrada.' }, 404);
     } catch (err) {
+      const requestId = crypto.randomUUID().slice(0, 8);
       const message = err instanceof Error ? err.message : 'Erro interno no Worker.';
-      return jsonResponse({ ok: false, error: message }, 500);
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          requestId,
+          method: request.method,
+          pathname,
+          error: message,
+          stack: err instanceof Error ? err.stack : undefined
+        })
+      );
+      // Detalhe só para rotas administrativas; o público recebe mensagem genérica.
+      const isAdmin = pathname.startsWith('/api/admin/') || pathname === '/api/settings';
+      return jsonResponse(
+        { ok: false, error: isAdmin ? message : 'Erro interno. Tente novamente.', requestId },
+        500,
+        { 'X-Request-Id': requestId }
+      );
     }
   },
 
@@ -491,7 +676,13 @@ export default {
       (async () => {
         try {
           const { effectiveEnv } = await loadEffectiveContext(env);
-          await runIngest(env.DB, env, createIngestDeps(env, effectiveEnv), { trigger: 'cron' });
+          const started = Date.now();
+          const summary = await runIngest(env.DB, env, createIngestDeps(env, effectiveEnv), {
+            trigger: 'cron'
+          });
+          const { items: _items, ...counts } = (summary || {}) as unknown as Record<string, unknown>;
+          void _items;
+          console.log(JSON.stringify({ event: 'ingest_cron', durationMs: Date.now() - started, ...counts }));
         } catch (err) {
           console.error('Falha na raspagem agendada:', err);
         }

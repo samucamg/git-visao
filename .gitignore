@@ -6,3 +6,6 @@ dist/
 *.log
 
 scripts/reclassify_progress.json
+
+# Originais em alta da Higgsfield (as versões otimizadas ficam em public/)
+assets-src/

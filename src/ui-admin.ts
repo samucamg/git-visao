@@ -69,6 +69,8 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" data-tab="scrape" type="button">📡 Raspagem (WhatsApp)</button>
       <button class="tab" data-tab="catalog" type="button">📚 Catálogo</button>
       <button class="tab" data-tab="add" type="button">➕ Incluir repositório</button>
+      <button class="tab" data-tab="bot" type="button">🤖 Bot do grupo</button>
+      <button class="tab" data-tab="promo" type="button">📺 Divulgação</button>
       <button class="tab" data-tab="settings" type="button">🔧 Configurações</button>
     </div>
 
@@ -164,6 +166,59 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
       </form>
     </section>
 
+    <!-- Bot do grupo -->
+    <section id="tab-bot" class="hidden panel space-y-4">
+      <h2 class="font-bold">Bot do grupo (responde buscas no WhatsApp)</h2>
+      <p class="text-xs text-slate-400">Usa a mesma instância da Evolution configurada na aba Raspagem. Gatilhos: mencionar o seu número junto com a palavra <b>vision</b> (ex.: <span class="font-mono">@Samuel vision temos algo de segurança?</span>) ou começar a mensagem com um dos comandos abaixo.</p>
+      <form id="bot-form" class="space-y-4">
+        <label class="flex items-center gap-2 text-sm"><input id="bot-enabled" type="checkbox" /> Bot ativado</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div><label class="lbl" for="bot-owner">Seu número (só dígitos, com DDI)</label><input id="bot-owner" class="inp font-mono" placeholder="5531999999999" /></div>
+          <div><label class="lbl" for="bot-triggers">Comandos (separados por vírgula)</label><input id="bot-triggers" class="inp font-mono" /></div>
+          <div><label class="lbl" for="bot-site">Endereço do site nos links</label><input id="bot-site" class="inp font-mono" /></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="lbl" for="bot-max">Resultados por resposta</label><input id="bot-max" type="number" min="1" max="10" class="inp" /></div>
+            <div><label class="lbl" for="bot-cool">Intervalo mínimo (s)</label><input id="bot-cool" type="number" min="0" max="600" class="inp" /></div>
+          </div>
+        </div>
+        <label class="flex items-center gap-2 text-sm"><input id="bot-allgroups" type="checkbox" /> Responder em todos os grupos (desmarcado = só nos grupos marcados na Raspagem)</label>
+        <button id="bot-save" class="btn" type="submit">💾 Salvar bot</button>
+      </form>
+      <div class="p-4 rounded-xl bg-slate-950/70 border border-white/10 space-y-3">
+        <h3 class="font-bold text-sm">Webhook na Evolution</h3>
+        <p class="text-xs text-slate-400">Endereço que a Evolution deve chamar a cada mensagem nova:</p>
+        <div class="flex gap-2 flex-wrap"><input id="bot-webhook-url" class="inp font-mono" readonly /><button id="bot-copy-url" class="btn2" type="button">Copiar</button></div>
+        <div class="flex gap-2 flex-wrap">
+          <button id="bot-check-webhook" class="btn2" type="button">🔍 Ver webhook atual da instância</button>
+          <button id="bot-register" class="btn2" type="button" style="background:#0e7490">⚡ Registrar este webhook na Evolution</button>
+          <button id="bot-regen" class="btn2" type="button">🔑 Gerar novo segredo</button>
+        </div>
+        <pre id="bot-webhook-out" class="hidden text-[11px] whitespace-pre-wrap font-mono p-3 rounded-lg bg-black/40 border border-white/10 max-h-60 overflow-auto"></pre>
+        <p class="text-[11px] text-amber-300">Atenção: a instância só tem um webhook. Se você já usa outro (n8n, outro bot), registrar este substitui o anterior; confira antes com "Ver webhook atual".</p>
+      </div>
+    </section>
+
+    <!-- Divulgação -->
+    <section id="tab-promo" class="hidden panel space-y-4">
+      <h2 class="font-bold">Divulgação do canal na home</h2>
+      <form id="promo-form" class="space-y-4">
+        <label class="flex items-center gap-2 text-sm"><input id="pr-enabled" type="checkbox" /> Mostrar divulgação no site</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div><label class="lbl" for="pr-name">Nome do canal</label><input id="pr-name" class="inp" /></div>
+          <div><label class="lbl" for="pr-handle">@ do canal</label><input id="pr-handle" class="inp font-mono" /></div>
+          <div><label class="lbl" for="pr-url">Link do canal</label><input id="pr-url" class="inp font-mono" /></div>
+          <div><label class="lbl" for="pr-subs">Texto de inscritos</label><input id="pr-subs" class="inp" placeholder="14,5 mil inscritos" /></div>
+          <div class="sm:col-span-2"><label class="lbl" for="pr-tagline">Frase do canal</label><input id="pr-tagline" class="inp" /></div>
+          <div><label class="lbl" for="pr-every">Card de vídeo a cada N repositórios (0 = não intercalar)</label><input id="pr-every" type="number" min="0" max="50" class="inp" /></div>
+        </div>
+        <div><label class="lbl" for="pr-videos">Vídeos em destaque (um link do YouTube por linha, na ordem de exibição; o 1º aparece no topo da home)</label>
+          <textarea id="pr-videos" rows="6" class="inp font-mono" style="resize:vertical"></textarea>
+          <p class="text-[11px] text-slate-500 mt-1">Os títulos são buscados automaticamente no YouTube ao salvar.</p></div>
+        <button id="pr-save" class="btn" type="submit">💾 Salvar divulgação</button>
+      </form>
+      <div id="pr-preview" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+    </section>
+
     <!-- Configurações -->
     <section id="tab-settings" class="hidden panel space-y-4">
       <h2 class="font-bold">Configurações (salvas no banco D1)</h2>
@@ -227,8 +282,10 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
       t.addEventListener('click', function () {
         document.querySelectorAll('#tabs .tab').forEach(function (x) { x.classList.remove('on'); });
         t.classList.add('on');
-        ['queue', 'scrape', 'catalog', 'add', 'settings'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== t.getAttribute('data-tab')); });
+        ['queue', 'scrape', 'catalog', 'add', 'bot', 'promo', 'settings'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== t.getAttribute('data-tab')); });
         if (t.getAttribute('data-tab') === 'catalog') loadCatalog(true);
+        if (t.getAttribute('data-tab') === 'bot') loadBot();
+        if (t.getAttribute('data-tab') === 'promo') loadPromo();
       });
     });
 
@@ -426,6 +483,82 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
         ['st-key', 'st-gh', 'st-newpass'].forEach(function (id) { $(id).value = ''; });
         toast('Configurações salvas.'); return loadStatus();
       }).catch(function (err) { toast(err.message, 'error'); }).then(function () { busy(btn, false); });
+    });
+
+    // ---------------- Bot do grupo
+    function fillBot(b) {
+      $('bot-enabled').checked = !!b.enabled;
+      $('bot-owner').value = b.ownerNumber || '';
+      $('bot-triggers').value = (b.triggers || []).join(', ');
+      $('bot-site').value = b.siteUrl || '';
+      $('bot-max').value = b.maxResults || 5;
+      $('bot-cool').value = b.cooldownSeconds == null ? 8 : b.cooldownSeconds;
+      $('bot-allgroups').checked = !!b.allowAllGroups;
+      $('bot-webhook-url').value = location.origin + (b.webhookPath || '');
+    }
+    function loadBot() { return api('/api/admin/bot/config').then(function (d) { fillBot(d.bot); }).catch(function (err) { toast(err.message, 'error'); }); }
+    function showOut(data) { var o = $('bot-webhook-out'); o.textContent = JSON.stringify(data, null, 2); o.classList.remove('hidden'); }
+    $('bot-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = $('bot-save'); busy(btn, true);
+      var body = {
+        enabled: $('bot-enabled').checked,
+        ownerNumber: $('bot-owner').value.split('').filter(function (c) { return c >= '0' && c <= '9'; }).join(''),
+        triggers: $('bot-triggers').value.split(',').map(function (x) { return x.trim(); }).filter(Boolean),
+        siteUrl: $('bot-site').value.trim(),
+        maxResults: Number($('bot-max').value || 5),
+        cooldownSeconds: Number($('bot-cool').value || 0),
+        allowAllGroups: $('bot-allgroups').checked
+      };
+      api('/api/admin/bot/config', 'POST', body).then(function (d) { fillBot(d.bot); toast('Bot salvo.'); })
+        .catch(function (err) { toast(err.message, 'error'); }).then(function () { busy(btn, false); });
+    });
+    $('bot-copy-url').addEventListener('click', function () { navigator.clipboard.writeText($('bot-webhook-url').value).then(function () { toast('Endereço copiado.'); }); });
+    $('bot-check-webhook').addEventListener('click', function () {
+      api('/api/admin/bot/webhook').then(showOut).catch(function (err) { toast(err.message, 'error'); });
+    });
+    $('bot-register').addEventListener('click', function () {
+      if (!confirm('Registrar o webhook do GitVisão na sua instância da Evolution? Ele substitui o webhook atual da instância, se houver.')) return;
+      var btn = this; busy(btn, true);
+      api('/api/admin/bot/webhook/register', 'POST', {}).then(function (d) { showOut(d); toast('Webhook registrado.'); })
+        .catch(function (err) { toast(err.message, 'error'); }).then(function () { busy(btn, false); });
+    });
+    $('bot-regen').addEventListener('click', function () {
+      if (!confirm('Gerar um novo segredo? O endereço do webhook muda e será preciso registrá-lo de novo na Evolution.')) return;
+      api('/api/admin/bot/config', 'POST', { regenerateSecret: true }).then(function (d) { fillBot(d.bot); toast('Novo segredo gerado. Registre o webhook de novo.'); })
+        .catch(function (err) { toast(err.message, 'error'); });
+    });
+
+    // ---------------- Divulgação
+    function fillPromo(p) {
+      $('pr-enabled').checked = !!p.enabled;
+      $('pr-name').value = p.channelName || '';
+      $('pr-handle').value = p.channelHandle || '';
+      $('pr-url').value = p.channelUrl || '';
+      $('pr-subs').value = p.subscribersLabel || '';
+      $('pr-tagline').value = p.channelTagline || '';
+      $('pr-every').value = p.gridEvery == null ? 9 : p.gridEvery;
+      $('pr-videos').value = (p.videos || []).map(function (v) { return 'https://www.youtube.com/watch?v=' + v.id + (v.start ? '&t=' + v.start + 's' : ''); }).join(String.fromCharCode(10));
+      $('pr-preview').innerHTML = (p.videos || []).map(function (v) {
+        return '<div class="space-y-1"><img class="rounded-lg w-full" src="https://i.ytimg.com/vi/' + esc(v.id) + '/mqdefault.jpg" alt=""><p class="text-[11px] text-slate-300">' + esc(v.title) + '</p></div>';
+      }).join('');
+    }
+    function loadPromo() { return api('/api/admin/promo').then(function (d) { fillPromo(d.promo); }).catch(function (err) { toast(err.message, 'error'); }); }
+    $('promo-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = $('pr-save'); busy(btn, true);
+      var body = {
+        enabled: $('pr-enabled').checked,
+        channelName: $('pr-name').value.trim(),
+        channelHandle: $('pr-handle').value.trim(),
+        channelUrl: $('pr-url').value.trim(),
+        subscribersLabel: $('pr-subs').value.trim(),
+        channelTagline: $('pr-tagline').value.trim(),
+        gridEvery: Number($('pr-every').value || 0),
+        videoUrls: $('pr-videos').value.split(String.fromCharCode(10)).map(function (x) { return x.trim(); }).filter(Boolean)
+      };
+      api('/api/admin/promo', 'POST', body).then(function (d) { fillPromo(d.promo); toast('Divulgação salva.'); })
+        .catch(function (err) { toast(err.message, 'error'); }).then(function () { busy(btn, false); });
     });
 
     if (getToken()) showApp(); else showLogin();
