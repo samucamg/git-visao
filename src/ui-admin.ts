@@ -232,7 +232,8 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
           <div><label class="lbl" for="st-title">Título do catálogo</label><input id="st-title" class="inp" /></div>
           <div class="sm:col-span-2"><label class="lbl" for="st-newpass">Nova senha de admin (opcional)</label><input id="st-newpass" type="password" class="inp font-mono" autocomplete="new-password" placeholder="Em branco mantém a atual" /></div>
         </div>
-        <button id="st-save" class="btn" type="submit">💾 Salvar configurações</button>
+        <div class="flex flex-wrap gap-2 items-center"><button id="st-save" class="btn" type="submit">💾 Salvar configurações</button><button id="st-test-ai" class="btn2" type="button">🧪 Testar IA (OmniRoute)</button></div>
+        <p id="st-test-out" class="hidden text-xs font-mono p-3 rounded-lg bg-black/40 border border-white/10"></p>
       </form>
     </section>
   </div>
@@ -484,6 +485,15 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
         ['st-key', 'st-gh', 'st-newpass'].forEach(function (id) { $(id).value = ''; });
         toast('Configurações salvas.'); return loadStatus();
       }).catch(function (err) { toast(err.message, 'error'); }).then(function () { busy(btn, false); });
+    });
+
+    $('st-test-ai').addEventListener('click', function () {
+      var btn = this, out = $('st-test-out'); busy(btn, true);
+      out.classList.remove('hidden'); out.textContent = 'Testando...';
+      api('/api/admin/ai/test', 'POST', {}).then(function (d) {
+        var t = d.test || {};
+        out.textContent = (t.ok ? '✅ IA funcionando' : '❌ Falhou') + ' | modelo: ' + t.model + ' | endpoint: ' + t.endpoint + (t.status ? ' | HTTP ' + t.status : '') + (t.latencyMs != null ? ' | ' + t.latencyMs + ' ms' : '') + (t.reply ? ' | resposta: ' + t.reply : '') + (t.error ? ' | erro: ' + t.error : '');
+      }).catch(function (err) { out.textContent = '❌ ' + err.message; }).then(function () { busy(btn, false, '🧪 Testar IA (OmniRoute)'); });
     });
 
     // ---------------- Bot do grupo

@@ -159,3 +159,26 @@ test('IA: prompt leva os dados do catálogo e formatAiReply limita a 3 links', (
   const out = formatAiReply('backup', 'Texto.', many, { ...DEFAULT_BOT_CONFIG });
   assert.equal((out.match(/\?repo=/g) || []).length, 3);
 });
+
+test('IA: testAiConnection informa sucesso, erro HTTP e configuração vazia sem vazar a chave', async () => {
+  const { testAiConnection } = await import('../src/bot-ai.ts');
+  invalidateSettingsCache();
+  const { db } = createSqliteD1();
+  const env = { DB: db } as any;
+  const vazio = await testAiConnection(db, env, (async () => new Response('{}')) as never);
+  assert.equal(vazio.ok, false);
+  assert.match(String(vazio.error), /vazi/);
+
+  await saveRuntimeSettings(db, { omnirouteBaseUrl: 'https://omni.test/v1', omnirouteApiKey: 'sk-segredo-123', omnirouteModel: 'm1' }, env);
+  const ok = await testAiConnection(db, env, (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: 'OK' } }] }), { status: 200 })) as never);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.reply, 'OK');
+  assert.equal(ok.endpoint, 'https://omni.test/v1/chat/completions');
+
+  const ruim = await testAiConnection(db, env, (async () =>
+    new Response(JSON.stringify({ error: { message: 'Invalid API key sk-segredo-123' } }), { status: 401 })) as never);
+  assert.equal(ruim.ok, false);
+  assert.equal(ruim.status, 401);
+  assert.ok(!JSON.stringify(ruim).includes('sk-segredo-123'), 'não vaza a chave');
+});

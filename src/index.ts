@@ -41,6 +41,7 @@ import {
   type BotConfigPatch
 } from './bot.ts';
 import { getPromoConfig, savePromoConfig, type PromoConfigPatch } from './promo.ts';
+import { testAiConnection } from './bot-ai.ts';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -295,6 +296,11 @@ async function handleAdminApi(
         : `${origin}/api/bot/webhook/${bot.secret}`;
     const result = await registerEvolutionWebhook(env.DB, env, url);
     return jsonResponse({ ...result, url }, result.ok ? 200 : 502);
+  }
+
+  // Teste da IA (OmniRoute) com o endereço, a chave e o modelo salvos
+  if (request.method === 'POST' && pathname === '/api/admin/ai/test') {
+    return jsonResponse({ ok: true, test: await testAiConnection(env.DB, env) });
   }
 
   // Divulgação (canal + vídeos em destaque)

@@ -63,6 +63,63 @@ export function buildAiUserPrompt(question: string, items: AiContextItem[]): str
   return `Pergunta do grupo: "${clip(question, 300)}"\n\nRepositórios do catálogo que a busca encontrou:\n\n${blocks.join('\n\n')}`;
 }
 
+export interface AiConnectionTest {
+  ok: boolean;
+  endpoint: string;
+  model: string;
+  status?: number;
+  latencyMs?: number;
+  reply?: string;
+  error?: string;
+}
+
+/** Teste mínimo do OmniRoute com o endereço, a chave e o modelo salvos (a chave nunca é devolvida). */
+export async function testAiConnection(
+  db: D1Database,
+  env: Env,
+  fetchImpl: FetchLike = fetch
+): Promise<AiConnectionTest> {
+  const settings = await getRuntimeSettings(db, env);
+  const baseUrl = settings.omnirouteBaseUrl?.trim() || '';
+  const apiKey = settings.omnirouteApiKey?.trim() || '';
+  const model = settings.omnirouteModel || 'gemini-2.5-flash';
+  const endpoint = baseUrl ? resolveEndpoint(baseUrl) : '';
+  if (!baseUrl) return { ok: false, endpoint, model, error: 'Endereço do OmniRoute vazio nas Configurações.' };
+  if (!apiKey) return { ok: false, endpoint, model, error: 'Chave do OmniRoute vazia nas Configurações.' };
+  const started = Date.now();
+  try {
+    const res = await fetchImpl(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 20,
+        temperature: 0,
+        messages: [{ role: 'user', content: 'Responda apenas: OK' }]
+      }),
+      signal: AbortSignal.timeout(AI_TIMEOUT_MS)
+    });
+    const latencyMs = Date.now() - started;
+    const raw = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = null;
+    }
+    if (!res.ok) {
+      const msg = data?.error?.message || data?.message || raw.slice(0, 200) || `HTTP ${res.status}`;
+      return { ok: false, endpoint, model, status: res.status, latencyMs, error: String(msg).replace(apiKey, '***') };
+    }
+    const reply = String(data?.choices?.[0]?.message?.content ?? '').trim();
+    if (!reply) return { ok: false, endpoint, model, status: res.status, latencyMs, error: 'Resposta sem texto (modelo existe?).' };
+    return { ok: true, endpoint, model, status: res.status, latencyMs, reply: reply.slice(0, 80) };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, endpoint, model, latencyMs: Date.now() - started, error: /timeout|abort/i.test(msg) ? `Sem resposta em ${AI_TIMEOUT_MS / 1000}s.` : msg };
+  }
+}
+
 /** Texto de resposta gerado pela IA, ou null se não houver IA configurada / falhar / demorar. */
 export async function answerWithAi(
   db: D1Database,
