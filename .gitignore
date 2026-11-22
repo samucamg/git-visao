@@ -9,3 +9,6 @@ scripts/reclassify_progress.json
 
 # Originais em alta da Higgsfield (as versões otimizadas ficam em public/)
 assets-src/
+
+# Token local (nunca versionar)
+githubtoken.txt

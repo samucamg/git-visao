@@ -182,3 +182,29 @@ test('IA: testAiConnection informa sucesso, erro HTTP e configuração vazia sem
   assert.equal(ruim.status, 401);
   assert.ok(!JSON.stringify(ruim).includes('sk-segredo-123'), 'não vaza a chave');
 });
+
+test('GitHub: testGithubToken detecta token recusado, ausente e válido sem vazar o token', async () => {
+  const { testGithubToken } = await import('../src/bot-ai.ts');
+  invalidateSettingsCache();
+  const { db } = createSqliteD1();
+  const env = { DB: db } as any;
+  const sem = await testGithubToken(db, env, (async () =>
+    new Response(JSON.stringify({ resources: { core: { limit: 60, remaining: 60 } } }), { status: 200 })) as never);
+  assert.equal(sem.ok, false);
+  assert.equal(sem.hasToken, false);
+
+  await saveRuntimeSettings(db, { githubToken: 'github_pat_segredo' }, env);
+  let auth = '';
+  const bom = await testGithubToken(db, env, (async (_u: string, init: any) => {
+    auth = init.headers.Authorization;
+    return new Response(JSON.stringify({ resources: { core: { limit: 5000, remaining: 4990, reset: 1795400000 } } }), { status: 200 });
+  }) as never);
+  assert.equal(auth, 'Bearer github_pat_segredo');
+  assert.equal(bom.ok, true);
+  assert.equal(bom.remaining, 4990);
+  assert.ok(!JSON.stringify(bom).includes('segredo'));
+
+  const vencido = await testGithubToken(db, env, (async () => new Response('{"message":"Bad credentials"}', { status: 401 })) as never);
+  assert.equal(vencido.ok, false);
+  assert.match(String(vencido.error), /vencido/);
+});

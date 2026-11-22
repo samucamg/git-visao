@@ -232,7 +232,7 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
           <div><label class="lbl" for="st-title">Título do catálogo</label><input id="st-title" class="inp" /></div>
           <div class="sm:col-span-2"><label class="lbl" for="st-newpass">Nova senha de admin (opcional)</label><input id="st-newpass" type="password" class="inp font-mono" autocomplete="new-password" placeholder="Em branco mantém a atual" /></div>
         </div>
-        <div class="flex flex-wrap gap-2 items-center"><button id="st-save" class="btn" type="submit">💾 Salvar configurações</button><button id="st-test-ai" class="btn2" type="button">🧪 Testar IA (OmniRoute)</button></div>
+        <div class="flex flex-wrap gap-2 items-center"><button id="st-save" class="btn" type="submit">💾 Salvar configurações</button><button id="st-test-ai" class="btn2" type="button">🧪 Testar IA e GitHub</button></div>
         <p id="st-test-out" class="hidden text-xs font-mono p-3 rounded-lg bg-black/40 border border-white/10"></p>
       </form>
     </section>
@@ -493,7 +493,10 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
       api('/api/admin/ai/test', 'POST', {}).then(function (d) {
         var t = d.test || {};
         out.textContent = (t.ok ? '✅ IA funcionando' : '❌ Falhou') + ' | modelo: ' + t.model + ' | endpoint: ' + t.endpoint + (t.status ? ' | HTTP ' + t.status : '') + (t.latencyMs != null ? ' | ' + t.latencyMs + ' ms' : '') + (t.reply ? ' | resposta: ' + t.reply : '') + (t.error ? ' | erro: ' + t.error : '');
-      }).catch(function (err) { out.textContent = '❌ ' + err.message; }).then(function () { busy(btn, false, '🧪 Testar IA (OmniRoute)'); });
+        var g = d.github || {};
+        out.textContent += String.fromCharCode(10) + (g.ok ? '✅ GitHub ok' : '❌ GitHub com problema') + (g.limit ? ' | limite ' + g.limit + '/h, restam ' + g.remaining : '') + (g.error ? ' | ' + g.error : '');
+        out.style.whiteSpace = 'pre-wrap';
+      }).catch(function (err) { out.textContent = '❌ ' + err.message; }).then(function () { busy(btn, false, '🧪 Testar IA e GitHub'); });
     });
 
     // ---------------- Bot do grupo

@@ -120,6 +120,44 @@ export async function testAiConnection(
   }
 }
 
+export interface GithubTokenTest {
+  ok: boolean;
+  hasToken: boolean;
+  status?: number;
+  limit?: number;
+  remaining?: number;
+  resetAt?: string;
+  error?: string;
+}
+
+/** Confere o token do GitHub salvo (limite por hora e o quanto resta). O token nunca é devolvido. */
+export async function testGithubToken(db: D1Database, env: Env, fetchImpl: FetchLike = fetch): Promise<GithubTokenTest> {
+  const settings = await getRuntimeSettings(db, env);
+  const token = settings.githubToken?.trim() || '';
+  const headers: Record<string, string> = { 'User-Agent': 'git-visao', Accept: 'application/vnd.github+json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await fetchImpl('https://api.github.com/rate_limit', { headers, signal: AbortSignal.timeout(10000) });
+    const data: any = await res.json().catch(() => null);
+    if (!res.ok) {
+      return { ok: false, hasToken: Boolean(token), status: res.status, error: res.status === 401 ? 'Token recusado pelo GitHub (inválido ou vencido).' : String(data?.message || `HTTP ${res.status}`) };
+    }
+    const core = data?.resources?.core || {};
+    const limit = Number(core.limit || 0);
+    return {
+      ok: Boolean(token) && limit >= 5000,
+      hasToken: Boolean(token),
+      status: res.status,
+      limit,
+      remaining: Number(core.remaining || 0),
+      resetAt: core.reset ? new Date(Number(core.reset) * 1000).toISOString() : undefined,
+      error: token ? undefined : 'Sem token: limite de 60 consultas/hora (a raspagem e o reprocessamento falham).'
+    };
+  } catch (err) {
+    return { ok: false, hasToken: Boolean(token), error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Texto de resposta gerado pela IA, ou null se não houver IA configurada / falhar / demorar. */
 export async function answerWithAi(
   db: D1Database,

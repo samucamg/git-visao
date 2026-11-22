@@ -41,7 +41,7 @@ import {
   type BotConfigPatch
 } from './bot.ts';
 import { getPromoConfig, savePromoConfig, type PromoConfigPatch } from './promo.ts';
-import { testAiConnection } from './bot-ai.ts';
+import { testAiConnection, testGithubToken } from './bot-ai.ts';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -300,7 +300,8 @@ async function handleAdminApi(
 
   // Teste da IA (OmniRoute) com o endereço, a chave e o modelo salvos
   if (request.method === 'POST' && pathname === '/api/admin/ai/test') {
-    return jsonResponse({ ok: true, test: await testAiConnection(env.DB, env) });
+    const [test, github] = await Promise.all([testAiConnection(env.DB, env), testGithubToken(env.DB, env)]);
+    return jsonResponse({ ok: true, test, github });
   }
 
   // Divulgação (canal + vídeos em destaque)
