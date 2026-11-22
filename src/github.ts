@@ -1,28 +1,55 @@
 import type { CostModel, DeployDifficulty, GitHubRepoMetadata, LicenseType } from './types.ts';
 
-export function isHarmfulRepository(meta: Partial<GitHubRepoMetadata>): { isHarmful: boolean; harmReason?: string } {
-  const text = `${meta.fullName || ''} ${meta.description || ''} ${meta.readmeExcerpt || ''} ${(meta.topics || []).join(' ')}`.toLowerCase();
+/**
+ * Remove do texto o que gera falso positivo: links, imagens/selos (ex.: "%C2%B7" = "·" codificado
+ * nos badges do shields.io era lido como "c2"), tags HTML e sequências URL-encoded.
+ */
+export function sanitizeForModeration(raw: string): string {
+  return String(raw || '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // imagens markdown
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links markdown: mantém só o texto
+    .replace(/<[^>]+>/g, ' ') // tags HTML (img, a, picture...)
+    .replace(/\b(?:https?|ftp):\/\/\S+/gi, ' ') // URLs soltas
+    .replace(/%[0-9a-f]{2}/gi, ' ') // restos URL-encoded
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
 
+export function isHarmfulRepository(meta: Partial<GitHubRepoMetadata>): { isHarmful: boolean; harmReason?: string } {
+  const text = sanitizeForModeration(
+    `${meta.fullName || ''} ${meta.description || ''} ${meta.readmeExcerpt || ''} ${(meta.topics || []).join(' ')}`
+  );
+
+  // Palavras ambíguas (malware, phishing, c2, rat) só contam em expressões que indicam a ferramenta
+  // de ataque em si: avisos ("o antivírus pode marcar como malware") e ferramentas de defesa
+  // ("anti-spam contra phishing") deixam de ser barrados.
   const harmfulPatterns = [
     {
-      pattern: /\b(malware|trojan|ransomware|c2|command and control|rat|remote access trojan|rootkit|keylogger|credential stealer|token grabber|phishing)\b/i,
+      pattern:
+        /\b(trojans?|ransomware|rootkits?|keyloggers?|infostealers?|credential stealers?|token grabbers?|remote access trojans?|c2 (?:server|framework|panel|agent|implant)s?|command[- ]and[- ]control (?:server|framework|panel)s?|rat (?:builder|client|panel|server|stub)s?|malware (?:builder|loader|dropper|generator|kit|framework|source code|samples? to deploy)|(?:build|create|spread|deploy|distribute|write) (?:your own )?malware|phishing (?:kit|page|pages|template|templates|framework|toolkit)s?|(?:clone|fake) login pages?)\b/i,
       reason: 'Contém indicadores óbvios de malware, trojan, ransomware, keylogger ou phishing.'
     },
     {
-      pattern: /\b(exploit kit|0-day|zero-day exploit|buffer overflow exploit|shellcode)\b/i,
+      pattern: /\b(exploit kits?|0-day exploits?|zero-day exploits?|buffer overflow exploits?|shellcode (?:loader|injector|runner)s?)\b/i,
       reason: 'Incentiva ou fornece exploits / kits de exploração maliciosos.'
     },
     {
-      pattern: /\b(botnet|ddos tool|dos tool|stressor|booter|stresser)\b/i,
+      pattern: /\b(botnets?|ddos tools?|dos tools?|ddos attack tools?|stressers?|booters?|ip stressers?)\b/i,
       reason: 'Relacionado a botnets ou ferramentas de ataque de negação de serviço (DDoS/DoS).'
     },
     {
-      pattern: /\b(bypass antivirus|evade antivirus|av evasion|edr bypass|malicious payload|malicious loader)\b/i,
+      pattern: /\b(bypass(?:es|ing)? (?:the )?antivirus|evade antivirus|av evasion|edr bypass|bypass edr|malicious payloads?|malicious loaders?|fud crypter|crypters?)\b/i,
       reason: 'Foco em evasão de antivírus/EDR ou injeção de payload malicioso.'
     },
     {
-      pattern: /\b(carding|cc generator|cvv checker|sql injection scanner malicious|defacement)\b/i,
+      pattern: /\b(carding|cc generators?|cvv checkers?|credit card generators?|defacement)\b/i,
       reason: 'Atividades ilícitas como carding, testes maliciosos não autorizados ou defacement.'
+    },
+    {
+      // Abuso de serviços pagos: burlar teste grátis, gerar contas, quebrar licença.
+      pattern:
+        /\b(trial activation|activate (?:the |your )?(?:free )?trials?|trial (?:reset|bypass|abuse|farming|stacking)|(?:bypass|skip|remove)(?:es|ing)? (?:the )?(?:paywall|trial|subscription|license check|licensing|activation)|(?:accounts?|email) generators?|(?:generate|create|farm) (?:unlimited|multiple|bulk) (?:free )?(?:accounts|trials)|unlimited (?:free )?(?:accounts|trials|premium)|free (?:premium|pro|plus|ultra) accounts?|(?<![\w-])keygens?|license key generators?|cracked (?:version|software|apps?)|stack(?:ing)? (?:free )?trials?)\b/i,
+      reason: 'Burla de serviços pagos (ativação de teste, geração de contas, quebra de licença).'
     }
   ];
 

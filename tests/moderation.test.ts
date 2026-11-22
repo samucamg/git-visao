@@ -55,3 +55,29 @@ test('2. generateFallbackSummary rejeita repositório malicioso lançando erro',
     generateFallbackSummary(maliciousMeta);
   }, /Repositório recusado por violação das diretrizes de segurança/);
 });
+
+// Casos reais do catálogo (22/11/2026): a moderação deve barrar só o que é de fato malicioso.
+test('moderação: não barra projetos legítimos por palavras fora de contexto', () => {
+  const ok = (description: string, readmeExcerpt = '') =>
+    isHarmfulRepository({ fullName: 'o/r', description, readmeExcerpt, topics: [] }).isHarmful;
+  // "%C2%B7" (o "·" codificado dos selos do shields.io) era lido como "c2"
+  assert.strictEqual(ok('Vector art tool in Rust', '<img src="https://img.shields.io/badge/macos%20%c2%b7%20windows-blue">'), false);
+  assert.strictEqual(ok('', '![x](https://img.shields.io/badge/linux_%C2%B7_macos-24292f)'), false);
+  // avisos ao usuário e ferramentas de defesa
+  assert.strictEqual(ok('The agent that grows with you', 'If Windows Defender flags uv.exe as malware, add an exception'), false);
+  assert.strictEqual(ok('Third-party plugins are not reviewed and may contain malware'), false);
+  assert.strictEqual(ok('Autonomous anti-spam engine', 'blocks fraudulent schemes, phishing links and scams'), false);
+  // ssh-keygen é ferramenta padrão
+  assert.strictEqual(ok('DevOps assistant', 'instale git, ssh, ssh-keygen e scp'), false);
+});
+
+test('moderação: continua barrando malware real e passa a barrar burla de serviços pagos', () => {
+  const bad = (description: string, readmeExcerpt = '') =>
+    isHarmfulRepository({ fullName: 'o/r', description, readmeExcerpt, topics: [] }).isHarmful;
+  assert.strictEqual(bad('Remote Access Trojan C2 server and malware loader'), true);
+  assert.strictEqual(bad('Phishing kit with fake login pages'), true);
+  assert.strictEqual(bad('Build your own malware with this framework'), true);
+  assert.strictEqual(bad('Google AI Pro (5TB) Trial Activation CLI'), true);
+  assert.strictEqual(bad('Unlimited free accounts generator'), true);
+  assert.strictEqual(bad('Photoshop keygen and patch'), true);
+});
