@@ -399,7 +399,7 @@ export default {
       // Webhook do bot do grupo (Evolution API). O segredo no caminho autentica a chamada.
       if (request.method === 'POST' && pathname.startsWith('/api/bot/webhook/')) {
         await ensureDatabaseInitialized(env.DB, env);
-        return handleBotWebhook(request, env);
+        return handleBotWebhook(request, env, {}, ctx);
       }
       if (request.method === 'GET' && pathname === '/admin') {
         return new Response(renderAdminHtml(env.OMNIROUTE_MODEL), {

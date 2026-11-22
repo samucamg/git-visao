@@ -181,6 +181,7 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
             <div><label class="lbl" for="bot-cool">Intervalo mínimo (s)</label><input id="bot-cool" type="number" min="0" max="600" class="inp" /></div>
           </div>
         </div>
+        <label class="flex items-center gap-2 text-sm"><input id="bot-useai" type="checkbox" /> Responder com IA (resposta escrita pela IA usando só os repositórios encontrados; desmarcado = só a lista)</label>
         <label class="flex items-center gap-2 text-sm"><input id="bot-allgroups" type="checkbox" /> Responder em todos os grupos (desmarcado = só nos grupos marcados na Raspagem)</label>
         <button id="bot-save" class="btn" type="submit">💾 Salvar bot</button>
       </form>
@@ -494,6 +495,7 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
       $('bot-max').value = b.maxResults || 5;
       $('bot-cool').value = b.cooldownSeconds == null ? 8 : b.cooldownSeconds;
       $('bot-allgroups').checked = !!b.allowAllGroups;
+      $('bot-useai').checked = b.useAi !== false;
       $('bot-webhook-url').value = location.origin + (b.webhookPath || '');
     }
     function loadBot() { return api('/api/admin/bot/config').then(function (d) { fillBot(d.bot); }).catch(function (err) { toast(err.message, 'error'); }); }
@@ -508,7 +510,8 @@ const ADMIN_TEMPLATE = `<!DOCTYPE html>
         siteUrl: $('bot-site').value.trim(),
         maxResults: Number($('bot-max').value || 5),
         cooldownSeconds: Number($('bot-cool').value || 0),
-        allowAllGroups: $('bot-allgroups').checked
+        allowAllGroups: $('bot-allgroups').checked,
+        useAi: $('bot-useai').checked
       };
       api('/api/admin/bot/config', 'POST', body).then(function (d) { fillBot(d.bot); toast('Bot salvo.'); })
         .catch(function (err) { toast(err.message, 'error'); }).then(function () { busy(btn, false); });

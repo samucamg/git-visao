@@ -5,6 +5,8 @@ import { getKV } from './db.ts';
 import { extractMessageText, normalizeMessage, type EvolutionMessage } from './evolution.ts';
 import { ensureIngestSchema, getIngestConfig, type IngestConfig } from './ingest-db.ts';
 import type { Env } from './types.ts';
+import { searchRepositories } from './search.ts';
+import { answerWithAi, type AiContextItem } from './bot-ai.ts';
 
 // ---------------------------------------------------------------- tipos
 
@@ -17,6 +19,8 @@ export interface BotConfig {
   allowAllGroups: boolean;
   cooldownSeconds: number;
   maxResults: number;
+  /** Responde com IA (OmniRoute) ancorada nos repositórios encontrados; desligado = só a lista. */
+  useAi: boolean;
 }
 
 export interface BotConfigPatch extends Partial<BotConfig> {
@@ -33,6 +37,10 @@ export interface BotSearchItem {
   stars: number;
   category: string;
   description: string;
+  language?: string;
+  intro_text?: string;
+  summary_text?: string;
+  killer_text?: string;
 }
 
 export interface BotSearchResult {
@@ -54,6 +62,8 @@ export interface QuotedMessage {
 
 export interface BotDeps {
   search: (db: D1Database, question: string, limit: number) => Promise<BotSearchResult>;
+  /** Texto da IA baseado nos itens encontrados (null = usar a lista simples). */
+  answer: (db: D1Database, env: Env, question: string, items: AiContextItem[]) => Promise<string | null>;
   sendText: (
     target: EvolutionTarget,
     jid: string,
@@ -96,7 +106,8 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   siteUrl: 'https://vision.24hs.eu.org',
   allowAllGroups: false,
   cooldownSeconds: 8,
-  maxResults: 5
+  maxResults: 5,
+  useAi: true
 };
 
 // ---------------------------------------------------------------- configuração
@@ -136,7 +147,8 @@ export function normalizeBotConfig(raw: unknown): BotConfig {
     siteUrl,
     allowAllGroups: src.allowAllGroups === true,
     cooldownSeconds: clampInt(src.cooldownSeconds, 0, 3600, DEFAULT_BOT_CONFIG.cooldownSeconds),
-    maxResults: clampInt(src.maxResults, 1, 10, DEFAULT_BOT_CONFIG.maxResults)
+    maxResults: clampInt(src.maxResults, 1, 10, DEFAULT_BOT_CONFIG.maxResults),
+    useAi: src.useAi !== false
   };
 }
 
@@ -370,6 +382,34 @@ export function formatBotReply(
   return text;
 }
 
+/** Resposta com o texto da IA + links montados pelo código (a IA nunca escreve URLs). */
+export function formatAiReply(
+  question: string,
+  aiText: string,
+  result: BotSearchResult,
+  config: BotConfig
+): string {
+  const site = config.siteUrl;
+  const items = (result.items || []).slice(0, 3);
+  const total = Math.max(Number(result.total) || 0, items.length);
+  const lines: string[] = [BOT_SIGNATURE, '', aiText.trim(), ''];
+  if (items.length) {
+    lines.push('🔗 *Veja a visão completa:*');
+    for (const item of items) {
+      const full = item.full_name || item.fullName || item.repo_key;
+      lines.push(`• ${full} — ${site}/?repo=${full}`);
+    }
+    lines.push('');
+  }
+  if (total > items.length) {
+    lines.push(`🔎 Mais ${total - items.length} resultados no site:`);
+    lines.push(`${site}/?q=${encodeURIComponent(question.trim())}`);
+    lines.push('');
+  }
+  lines.push(`📺 Tutoriais: ${TUTORIALS}`);
+  return lines.join('\n');
+}
+
 // ---------------------------------------------------------------- Evolution
 
 function evolutionUrl(target: EvolutionTarget, path: string): string {
@@ -554,12 +594,10 @@ function collectMentionedJids(message: unknown, depth = 0): string[] {
 }
 
 const defaultDeps: BotDeps = {
-  search: async (db, question, limit) => {
-    // Importação dinâmica: os testes não dependem do módulo de busca.
-    const specifier = './search.ts';
-    const mod: AnyRecord = await import(specifier);
-    return mod.searchRepositories(db, { q: question, limit, lang: 'pt' });
-  },
+  // Import estático: o empacotador do Worker não inclui módulos carregados por import(variável).
+  search: (db, question, limit) =>
+    searchRepositories(db, { q: question, limit, lang: 'pt' }) as unknown as Promise<BotSearchResult>,
+  answer: (db, env, question, items) => answerWithAi(db, env, question, items),
   sendText: sendEvolutionText,
   now: () => Date.now()
 };
@@ -613,7 +651,15 @@ async function processRecord(
   } else {
     try {
       const result = await deps.search(db, question, bot.maxResults);
-      text = formatBotReply(question, result, bot);
+      let aiText: string | null = null;
+      if (bot.useAi && result.items.length > 0) {
+        try {
+          aiText = await deps.answer(db, env, question, result.items as AiContextItem[]);
+        } catch (err) {
+          console.error('Bot: falha na IA', err);
+        }
+      }
+      text = aiText ? formatAiReply(question, aiText, result, bot) : formatBotReply(question, result, bot);
     } catch (err) {
       console.error('Bot: falha na busca', err);
       text = `${BOT_SIGNATURE} — não consegui buscar agora. Tente de novo em instantes.\n🔎 ${bot.siteUrl}/?q=${encodeURIComponent(question)}`;
@@ -635,7 +681,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 export async function handleBotWebhook(
   request: Request,
   env: Env,
-  deps: Partial<BotDeps> = {}
+  deps: Partial<BotDeps> = {},
+  ctx?: { waitUntil(promise: Promise<unknown>): void }
 ): Promise<Response> {
   const db = env.DB;
   const d: BotDeps = { ...defaultDeps, ...deps };
@@ -674,17 +721,25 @@ export async function handleBotWebhook(
   const ingest = await getIngestConfig(db, env);
   const reasons: string[] = [];
   let handled = false;
-  for (const record of records.slice(0, 20)) {
-    try {
-      const result = await processRecord(db, env, bot, ingest, record, d);
-      if (result.handled) handled = true;
-      reasons.push(result.reason);
-    } catch (err) {
-      // Erro aqui não pode virar retry infinito do Evolution.
-      console.error('Bot: erro ao processar mensagem', err);
-      reasons.push('error');
+  const work = async () => {
+    for (const record of records.slice(0, 20)) {
+      try {
+        const result = await processRecord(db, env, bot, ingest, record, d);
+        if (result.handled) handled = true;
+        reasons.push(result.reason);
+      } catch (err) {
+        // Erro aqui não pode virar retry infinito do Evolution.
+        console.error('Bot: erro ao processar mensagem', err);
+        reasons.push('error');
+      }
     }
+  };
+  // No Worker: responde na hora à Evolution e trabalha em segundo plano (a IA leva alguns segundos).
+  if (ctx) {
+    ctx.waitUntil(work());
+    return jsonResponse({ ok: true, handled: false, reason: 'queued' });
   }
+  await work();
   return jsonResponse({
     ok: true,
     handled,
